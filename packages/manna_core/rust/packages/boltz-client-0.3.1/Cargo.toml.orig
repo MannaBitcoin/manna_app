@@ -1,0 +1,94 @@
+[package]
+name = "boltz-client"
+description = "a boltz exchange client for swaps between BTC/LBTC & LN"
+authors = ["i5hi <ishi@satoshiportal.com>", "Rajarshi Maitra <raj@bitshala.org>"]
+version = "0.3.1"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "boltz_client"
+path = "src/lib.rs"
+doctest = false
+crate-type = ["lib"]
+
+[workspace]
+members = [
+    "bindings",
+    "macros",
+]
+
+[workspace.dependencies]
+bitcoin = { version = "0.32.2", features = ["rand", "base64", "rand-std"] }
+elements = { version = "0.25.0", features = ["serde"] }
+serde = { version = "1.0.0", features = ["derive"] }
+serde_json = "1.0.0"
+async-trait = "0.1.86"
+tokio = { version = "1.43.0", features = ["time"] }
+serial_test = "3.2.0"
+
+[profile.release]
+strip = true
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[dependencies]
+bitcoin = { workspace = true } 
+
+# Used for musig API not available in secp included in bitcoin/elements
+# TODO: remove once bitcoin included version contains musig
+secp256k1_musig = { package = "secp256k1", version = "0.32.0-beta.0" }
+
+elements = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+bip39 = "2.0.0"
+lightning-invoice = "0.32.0"
+url = "2.5.0"
+log = "^0.4"
+env_logger = "0.7"
+hex = "0.4"
+lnurl-rs = { version = "0.9.0", default-features = false, features = ["async", "async-https"], optional = true }
+reqwest = { version = "0.12.12" , default-features = false, features = ["json", "rustls-tls"] }
+macros = { version = "1.0.0", package = "boltz-client-macros" }
+futures-util = "0.3.31"
+tokio-tungstenite-wasm = { version = "0.6.0", features = ["rustls-tls-webpki-roots"], optional = true }
+bip85_extended = "1.1.0"
+
+[target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies]
+electrum-client = { version = "0.21.0", default-features = false, features = ["use-rustls-ring", "proxy"], optional = true }
+
+[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+js-sys = "0.3.77"
+web-sys = "0.3.77"
+wasm-bindgen-futures = "0.4.50"
+gloo-timers = { version = "0.3.0", features = ["futures"] }
+
+
+[dev-dependencies]
+serial_test = { workspace = true }
+tokio = { version = "1.43.0", features = ["rt", "macros"] }
+anyhow = "1.0.100"
+
+[target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dev-dependencies]
+bitcoind = { version = "0.36.0", features = ["25_0"] }
+elementsd = { version = "0.11.0", features = ["22_1_1"] }
+
+[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dev-dependencies]
+wasm-bindgen-test = "0.3.50"
+wasm-bindgen = "0.2.100"
+futures = "0.3.31"
+
+[features]
+default = ["esplora"]
+lnurl = ["dep:lnurl-rs"]
+esplora = []
+electrum = ["dep:electrum-client"]
+# Feature to enable tests that require previous initialization of a regtest environment
+regtest = []
+ws = ["tokio/sync", "tokio/rt", "tokio/macros", "dep:tokio-tungstenite-wasm"]

@@ -1,0 +1,18 @@
+flutter_launcher_icons:
+  image_path: "assets/images/logo.png"
+
+  android: "launcher_icon"
+  min_sdk_android: 21
+  adaptive_icon_background: "#5656E6"
+  adaptive_icon_foreground: "assets/images/manna_white_square.png"
+
+  ios: true
+  remove_alpha_ios: true
+  background_color_ios: "#5656E6"
+
+  macos:
+    generate: true
+
+  windows:
+    generate: true
+    icon_size: 256

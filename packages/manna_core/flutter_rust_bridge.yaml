@@ -1,0 +1,8 @@
+rust_root: rust/
+rust_input: crate::lwk,crate::boltz,crate::util,crate::lnurl_util,crate::logger
+dart_output: lib/src/rust/
+full_dep: false
+dart_entrypoint_class_name: MannaCore
+enable_lifetime: true
+web: false
+stop_on_error: true

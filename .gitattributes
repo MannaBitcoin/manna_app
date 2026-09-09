@@ -1,0 +1,2 @@
+ios/NotificationExtension/NSE_Rust/MannaCore.xcframework/ios-arm64/libmanna_core.a filter=lfs diff=lfs merge=lfs -text
+macos/NotificationExtension/NSE_Rust/MannaCore.xcframework/macos-arm64_x86_64/universal-apple-darwin-static.a filter=lfs diff=lfs merge=lfs -text

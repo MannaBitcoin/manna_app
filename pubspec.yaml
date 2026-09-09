@@ -1,0 +1,119 @@
+name: manna
+description: "A Slick Bitcoin wallet"
+publish_to: 'none'
+version: 1.1.22+50
+
+environment:
+  sdk: ">=3.12.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  manna_core:
+    path: ./packages/manna_core
+
+  mobile_scanner: ^7.2.0
+  path: ^1.9.1
+  path_provider: ^2.1.6
+  path_provider_foundation: ^2.5.1
+  fluttertoast: ^9.1.0
+  local_auth: ^3.0.1
+  pretty_qr_code: ^3.6.0
+  intl: ^0.20.2
+  image_picker: ^1.2.2
+  lottie: ^3.3.3
+  supabase_flutter: ^2.14.2
+  dio: ^5.9.2
+  math_expressions: ^3.1.0
+  flutter_svg: ^2.3.0
+  shared_preferences: ^2.5.5
+  shared_preference_app_group: ^2.1.0
+  share_plus: ^13.1.0
+  url_launcher: ^6.3.2
+  package_info_plus: ^10.1.0
+  croppy: ^1.5.3
+  relative_time: ^5.0.0
+  firebase_core: ^4.11.0
+  firebase_crashlytics: ^5.2.4
+  firebase_analytics: ^12.4.3
+  firebase_messaging: ^16.4.0
+  file_picker: ^12.0.0-beta.7
+  dropdown_button2: ^2.3.9
+  file_saver: ^0.4.0
+  archive: ^4.0.9
+  csv: ^6.0.0
+  internet_connection_checker_plus: ^2.7.2
+  action_slider: ^0.7.0
+  logger: ^2.7.0
+  photo_view: ^0.15.0
+  app_links: ^7.1.2
+  upgrader: ^13.5.0
+  permission_handler: ^12.0.3
+  hive_ce: ^2.19.3
+  crypto: ^3.0.7
+  web_socket_channel: ^3.0.3
+  dart_nostr:
+    path: packages/nostr
+  uuid: ^4.5.3
+  cached_network_image: ^3.4.1
+  bech32: ^0.2.2
+  convert: ^3.1.2
+  scidart: ^0.0.2-dev.12
+  maplibre_gl: ^0.24.0
+  text_search: ^1.0.2
+  map_launcher: ^4.5.0
+  dart_jsonwebtoken: ^3.4.1
+  emoji_picker_flutter: ^4.4.0
+  audioplayers: ^6.7.1
+  keyboard_detection: ^0.8.1
+  image: ^4.9.1
+  connectivity_plus: ^7.1.1
+  flutter_inappwebview: ^6.1.5
+  fl_chart: ^1.2.0
+  native_dio_adapter: ^1.8.0
+  http: ^1.6.0
+  cryptography_plus: ^3.0.0
+  device_info_plus: ^13.1.0
+  nfc_manager: ^4.2.1
+  nfc_manager_ndef: ^1.1.0
+  app_settings: ^7.0.0
+  wakelock_plus: ^1.6.1
+  battery_optimization_helper: ^0.2.0
+  flutter_image_compress: ^2.4.0
+  build_info: ^2.0.0
+  branta: ^3.2.0
+  flutter_secure_dotenv: ^2.0.0
+
+
+dependency_overrides:
+  # cause native_dio_adapter is using bad version
+  cupertino_http: ^3.0.2
+  # for cupertino_http
+  native_toolchain_c: ^0.19.1
+  hooks: ^2.0.0
+  jni: ^1.0.2
+
+dev_dependencies:
+  build_runner: ^2.15.1
+  flutter_lints: ^6.0.0
+  flutter_secure_dotenv_generator:
+    path: packages/flutter_secure_dotenv_generator
+#  flutter_native_splash: ^2.4.8
+#  dart run flutter_native_splash:create
+#  flutter_launcher_icons:
+#    git: https://github.com/fluttercommunity/flutter_launcher_icons.git
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/lottie/
+    - assets/data/
+    - assets/flags/
+    - assets/audio/
+
+  fonts:
+    - family: MaterialIcons2
+      fonts:
+        - asset: assets/material-symbols-outlined.ttf

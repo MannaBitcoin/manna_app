@@ -1,0 +1,9 @@
+target/
+Cargo.lock
+boltz-*json
+
+# RustRover
+.idea/
+
+# Bindings
+__pycache__/
