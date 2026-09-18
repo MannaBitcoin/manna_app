@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:branta/branta.dart' hide Platform;
+import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart' show OnchainConfirmationSpeed;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:manna/app_state.dart';
@@ -24,13 +25,13 @@ import 'package:manna/services/nostr_service.dart';
 import 'package:manna/services/transaction_service.dart';
 import 'package:manna/theme.dart';
 import 'package:manna/utils/extensions.dart';
-import 'package:manna/widgets/bottom sheets/confirm_payment_bottom_sheet.dart';
 import 'package:manna/utils/constants.dart';
 import 'package:manna/utils/de_bouncer.dart';
 import 'package:manna/utils/sats_extension.dart';
 import 'package:manna/utils/state_extension.dart';
 import 'package:manna/utils/toast_service.dart';
 import 'package:manna/widgets/amount_text.dart';
+import 'package:manna/widgets/bottom%20sheets/confirm_payment_bottom_sheet.dart';
 import 'package:manna/widgets/bottom%20sheets/transaction_categories_bottom_sheet.dart';
 import 'package:manna/widgets/fees_tile.dart';
 import 'package:manna_core/manna_core.dart';
@@ -39,9 +40,10 @@ import 'package:url_launcher/url_launcher_string.dart';
 import 'package:http/http.dart' as http;
 
 class SendScreen extends StatefulWidget {
-  const SendScreen({this.address, this.contact, super.key});
+  const SendScreen({this.address, this.amount, this.contact, super.key});
 
   final String? address;
+  final int? amount;
   final Contact? contact;
 
   @override
@@ -54,26 +56,27 @@ class _SendScreenState extends State<SendScreen> {
   final fiatAmountController = TextEditingController();
   final satAmountController = TextEditingController();
 
-  final memoController = TextEditingController();
+  final commentController = TextEditingController();
   final noteController = TextEditingController();
   Set<String> selectedCategory = {};
   bool isExtraNoteExpanded = false;
-  GlobalKey<TooltipState> noteToolTipKey = GlobalKey();
 
-  AddressType addressType = AddressType.unknown;
+  AddressData addressData = AddressData(addressType: AddressType.unknown, data: null, address: '');
   final addressFocusNode = FocusNode();
   int originalAmount = 0;
   int amount = 0;
   bool lockAmount = true;
-  bool lockMemo = false;
+  bool lockComment = false;
   bool sendAll = false;
   final feeDeBouncer = DeBouncer(const Duration(milliseconds: 300));
   final addressDeBouncer = DeBouncer(const Duration(milliseconds: 350));
   String clipboardAddress = '';
 
-  final feeExpansionController = ExpansibleController();
-  bool isFeeExpanded = false;
   late Contact? receiverDetail = widget.contact;
+  bool isFeeExpanded = false;
+  final feeExpansionController = ExpansibleController();
+  bool isChainFeeSelectionExpanded = false;
+  final feeRateExpansionController = ExpansibleController();
 
   PayOutData? paymentData;
   FeesAndAmounts? calculations;
@@ -89,9 +92,6 @@ class _SendScreenState extends State<SendScreen> {
 
   @override
   void initState() {
-    if (selectedWallet.type == WalletType.watchOnly) {
-      postFrameCallBack(() => ToastService.show('You cannot spend from a watch-only wallet.'));
-    }
     lifecycleListener = AppLifecycleListener(
       onResume: () async {
         nfcStatus = await NfcService.getNFCState();
@@ -102,7 +102,7 @@ class _SendScreenState extends State<SendScreen> {
     NfcService.start().then((value) => NfcService.getNFCState().then((value) => update(() => nfcStatus = value)));
 
     if (widget.address != null) {
-      processAddress(widget.address!);
+      processAddress(widget.address!, defaultAmount: widget.amount);
     } else {
       getClipboardData();
     }
@@ -116,8 +116,10 @@ class _SendScreenState extends State<SendScreen> {
     addressController.dispose();
     satAmountController.dispose();
     fiatAmountController.dispose();
-    memoController.dispose();
+    commentController.dispose();
     noteController.dispose();
+    feeExpansionController.dispose();
+    feeRateExpansionController.dispose();
     super.dispose();
   }
 
@@ -143,13 +145,16 @@ class _SendScreenState extends State<SendScreen> {
   @override
   Widget build(BuildContext context) {
     final isPaymentFeasible =
-        addressController.text.trim().isNotEmpty &&
-        addressType != AddressType.unknown &&
+        addressData.address.isNotEmpty &&
+        addressData.addressType != AddressType.unknown &&
         (calculations?.sendAmount ?? 0) > 0 &&
-        (calculations?.totalSpend ?? 0) <= selectedWallet.balance;
+        (calculations?.sendAmount ?? 0) <= selectedWallet.balance;
     if (!isPaymentFeasible || calculations == null) {
       try {
-        postFrameCallBack(() => feeExpansionController.collapse());
+        postFrameCallBack(() {
+          feeExpansionController.collapse();
+          feeRateExpansionController.collapse();
+        });
       } catch (_) {}
     }
 
@@ -260,7 +265,7 @@ class _SendScreenState extends State<SendScreen> {
                               optionsBuilder: (textEditingValue) {
                                 final val = textEditingValue.text.trim().toLowerCase();
                                 if (val.isEmpty) return [];
-                                if (addressType != AddressType.unknown || val.length > 100) return [];
+                                if (addressData.addressType != AddressType.unknown || val.length > 100) return [];
                                 return {
                                   ...DB.contacts.values
                                       .where(
@@ -298,8 +303,8 @@ class _SendScreenState extends State<SendScreen> {
                                   minLines: 2,
                                   decoration: InputDecoration(
                                     filled: true,
-                                    fillColor: switch (addressType) {
-                                      AddressType.bitcoin => const Color.fromARGB(
+                                    fillColor: switch (addressData.addressType) {
+                                      AddressType.bitcoin || AddressType.silentPayment => const Color.fromARGB(
                                         255,
                                         239,
                                         142,
@@ -309,12 +314,8 @@ class _SendScreenState extends State<SendScreen> {
                                       AddressType.bolt12Invoice ||
                                       AddressType.lnurl ||
                                       AddressType.bolt12Offer => Colors.green.withValues(alpha: 0.2),
-                                      AddressType.liquid => const Color.fromARGB(
-                                        255,
-                                        69,
-                                        184,
-                                        169,
-                                      ).withValues(alpha: 0.2),
+                                      AddressType.spark ||
+                                      AddressType.sparkInvoice => AppColors.primaryColor.withValues(alpha: 0.2),
                                       AddressType.unknown => Colors.transparent,
                                     },
                                     labelText: 'Input address or scan QR code',
@@ -373,7 +374,7 @@ class _SendScreenState extends State<SendScreen> {
                           ],
                         ),
 
-                        if (addressType != AddressType.unknown) ...[
+                        if (addressData.addressType != AddressType.unknown) ...[
                           TextFormField(
                             controller: fiatAmountController,
                             keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -391,9 +392,7 @@ class _SendScreenState extends State<SendScreen> {
                               satAmountController.text = amount.toStringAsFixed(0);
                               feeDeBouncer.call(() => rebuildFees());
                             },
-                            enabled: ({AddressType.bolt11Invoice, AddressType.bolt12Invoice}.contains(addressType)
-                                ? !lockAmount
-                                : !sendAll),
+                            enabled: !(sendAll || lockAmount),
                             maxLength: 8,
                             inputFormatters: [FilteringTextInputFormatter.allow(Regexes.decimalFilter)],
                             buildCounter: (context, {required currentLength, required isFocused, required maxLength}) =>
@@ -416,9 +415,7 @@ class _SendScreenState extends State<SendScreen> {
                               fiatAmountController.text = amount.satsToFiat().toStringAsFixed(2);
                               feeDeBouncer.call(() => rebuildFees());
                             },
-                            enabled: ({AddressType.bolt11Invoice, AddressType.bolt12Invoice}.contains(addressType)
-                                ? !lockAmount
-                                : !sendAll),
+                            enabled: !(sendAll || lockAmount),
                             maxLength: 8,
                             inputFormatters: [
                               AppState.bitcoinDisplayStyle == 2
@@ -477,7 +474,8 @@ class _SendScreenState extends State<SendScreen> {
                             ),
                         ],
 
-                        if (addressType != AddressType.unknown) ...[
+                        if ({AddressType.spark, AddressType.lnurl}.contains(addressData.addressType) ||
+                            commentController.text.isNotEmpty) ...[
                           Theme(
                             data: Theme.of(context).copyWith(focusColor: Colors.transparent),
                             child: ExpansionTile(
@@ -486,14 +484,14 @@ class _SendScreenState extends State<SendScreen> {
                               shape: const RoundedRectangleBorder(),
                               expandedCrossAxisAlignment: .start,
                               title: TextFormField(
-                                controller: memoController,
+                                controller: commentController,
                                 decoration: InputDecoration(
-                                  labelText: 'Memo',
+                                  labelText: 'Comment',
                                   suffixIcon: isExtraNoteExpanded
                                       ? const Tooltip(
                                           triggerMode: TooltipTriggerMode.tap,
                                           showDuration: Duration(seconds: 3),
-                                          message: 'This memo will be visible for you and the receiver.',
+                                          message: 'This comment will be visible to you and the receiver.',
                                           child: Icon(Icons.info_outline, color: AppColors.accentColor),
                                         )
                                       : null,
@@ -503,21 +501,20 @@ class _SendScreenState extends State<SendScreen> {
                                 textCapitalization: TextCapitalization.sentences,
                                 maxLines: 3,
                                 minLines: 1,
-                                enabled: !lockMemo,
+                                enabled: !lockComment,
                               ),
                               children: [
                                 const SizedBox(height: 4),
                                 TextFormField(
                                   controller: noteController,
                                   textInputAction: TextInputAction.next,
-                                  decoration: InputDecoration(
+                                  decoration: const InputDecoration(
                                     labelText: 'Note',
                                     suffixIcon: Tooltip(
-                                      key: noteToolTipKey,
                                       triggerMode: TooltipTriggerMode.tap,
-                                      showDuration: const Duration(seconds: 3),
+                                      showDuration: Duration(seconds: 3),
                                       message: 'This note is only visible to you.',
-                                      child: const Icon(Icons.info_outline, color: AppColors.accentColor),
+                                      child: Icon(Icons.info_outline, color: AppColors.accentColor),
                                     ),
                                   ),
                                   keyboardType: TextInputType.multiline,
@@ -577,17 +574,14 @@ class _SendScreenState extends State<SendScreen> {
                           minVerticalPadding: 0,
                           child: ExpansionTile(
                             controller: feeExpansionController,
-                            title: isFeeExpanded
-                                ? const Text('Estimated Fee Details', style: TextStyle(fontSize: 16))
-                                : FeesTile(
-                                    title: 'Estimated total',
-                                    amountSat: isPaymentFeasible ? calculations!.totalSpend : 0,
-                                  ),
+                            enabled: isPaymentFeasible,
+                            onExpansionChanged: (value) => update(() => isFeeExpanded = value),
                             minTileHeight: 0,
                             shape: const Border(),
                             tilePadding: EdgeInsets.only(top: 8, bottom: !isFeeExpanded ? 8 : 0),
-                            enabled: isPaymentFeasible,
-                            onExpansionChanged: (value) => update(() => isFeeExpanded = value),
+                            title: isFeeExpanded
+                                ? const Text('Fee Details', style: TextStyle(fontSize: 16))
+                                : FeesTile(title: 'Total', amountSat: isPaymentFeasible ? calculations!.sendAmount : 0),
                             children: [
                               InkWell(
                                 onTap: () => feeExpansionController.collapse(),
@@ -595,20 +589,17 @@ class _SendScreenState extends State<SendScreen> {
                                   children: [
                                     if (calculations != null) ...[
                                       FeesTile(amountSat: calculations!.receiveAmount, title: 'Amount'),
-                                      if (calculations!.mannaFee > 0)
-                                        FeesTile(amountSat: calculations!.mannaFee, title: 'Manna fee'),
-                                      if (calculations!.boltzFee > 0)
-                                        FeesTile(amountSat: calculations!.boltzFee, title: 'Boltz fee'),
-                                      if (calculations!.boltzNetworkFee > 0)
-                                        FeesTile(amountSat: calculations!.boltzNetworkFee, title: 'Boltz network fee'),
-                                      if (calculations!.liquidNetworkFee > 0)
-                                        FeesTile(amountSat: calculations!.liquidNetworkFee, title: 'Network fee'),
+                                      if (calculations!.sparkFee > 0)
+                                        FeesTile(amountSat: calculations!.sparkFee, title: 'Spark fee'),
+                                      if (calculations!.lightningFee > 0)
+                                        FeesTile(amountSat: calculations!.lightningFee, title: 'Lightning fee'),
+                                      if (calculations!.networkFee > 0)
+                                        FeesTile(amountSat: calculations!.networkFee, title: 'Network fee'),
                                     ],
-
                                     const Divider(),
                                     FeesTile(
-                                      title: 'Estimated total',
-                                      amountSat: isPaymentFeasible ? calculations!.totalSpend : 0,
+                                      title: 'Total',
+                                      amountSat: isPaymentFeasible ? calculations!.sendAmount : 0,
                                     ),
                                   ],
                                 ),
@@ -616,6 +607,108 @@ class _SendScreenState extends State<SendScreen> {
                             ],
                           ),
                         ),
+
+                        // onchain Fee speed selection
+                        if (calculations?.onchainFeeQuote != null)
+                          Builder(
+                            builder: (context) {
+                              (int, int) getQuote(OnchainConfirmationSpeed feeRate) => switch (feeRate) {
+                                OnchainConfirmationSpeed.fast => (
+                                  calculations!.onchainFeeQuote!.speedFast.userFeeSat.i,
+                                  calculations!.onchainFeeQuote!.speedFast.l1BroadcastFeeSat.i,
+                                ),
+                                OnchainConfirmationSpeed.medium => (
+                                  calculations!.onchainFeeQuote!.speedMedium.userFeeSat.i,
+                                  calculations!.onchainFeeQuote!.speedMedium.l1BroadcastFeeSat.i,
+                                ),
+                                OnchainConfirmationSpeed.slow => (
+                                  calculations!.onchainFeeQuote!.speedSlow.userFeeSat.i,
+                                  calculations!.onchainFeeQuote!.speedSlow.l1BroadcastFeeSat.i,
+                                ),
+                              };
+                              final selectedQuoteFees = getQuote(calculations!.btcFeeRate);
+                              return ListTileTheme(
+                                minVerticalPadding: 0,
+                                child: RadioGroup(
+                                  groupValue: calculations!.btcFeeRate,
+                                  onChanged: (value) {
+                                    if (value != null) {
+                                      final quote = getQuote(value);
+                                      update(
+                                        () => calculations = calculations!.copyWith(
+                                          btcFeeRate: value,
+                                          sparkFee: quote.$1,
+                                          networkFee: quote.$2,
+                                          sendAmount: calculations!.receiveAmount + quote.$1 + quote.$2,
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  child: ListTileTheme(
+                                    contentPadding: EdgeInsets.zero,
+                                    child: ExpansionTile(
+                                      controller: feeRateExpansionController,
+                                      onExpansionChanged: (value) => update(() => isChainFeeSelectionExpanded = value),
+                                      minTileHeight: 0,
+                                      shape: const Border(),
+                                      tilePadding: EdgeInsets.only(
+                                        top: 8,
+                                        bottom: !isChainFeeSelectionExpanded ? 8 : 0,
+                                      ),
+                                      title: isChainFeeSelectionExpanded
+                                          ? const Text('Transaction speed', style: TextStyle(fontSize: 16))
+                                          : FeesTile(
+                                              title:
+                                                  'Transaction speed : ${switch (calculations!.btcFeeRate) {
+                                                    OnchainConfirmationSpeed.fast => 'Fast',
+                                                    OnchainConfirmationSpeed.medium => 'Medium',
+                                                    OnchainConfirmationSpeed.slow => 'Slow',
+                                                  }}',
+                                              amountSat: isPaymentFeasible
+                                                  ? selectedQuoteFees.$1 + selectedQuoteFees.$2
+                                                  : 0,
+                                            ),
+                                      children: [
+                                        RadioListTile(
+                                          value: OnchainConfirmationSpeed.fast,
+                                          title: const Text('Fast'),
+                                          subtitle: Text(
+                                            'Spark fee: ${getSatInBitcoinStyle(calculations!.onchainFeeQuote!.speedFast.userFeeSat.i)}',
+                                          ),
+                                          secondary: AmountText(
+                                            amountSat: calculations!.onchainFeeQuote!.speedFast.l1BroadcastFeeSat.i,
+                                            showFiat: true,
+                                          ),
+                                        ),
+                                        RadioListTile(
+                                          value: OnchainConfirmationSpeed.medium,
+                                          title: const Text('Medium'),
+                                          subtitle: Text(
+                                            'Spark fee: ${getSatInBitcoinStyle(calculations!.onchainFeeQuote!.speedMedium.userFeeSat.i)}',
+                                          ),
+                                          secondary: AmountText(
+                                            amountSat: calculations!.onchainFeeQuote!.speedMedium.l1BroadcastFeeSat.i,
+                                            showFiat: true,
+                                          ),
+                                        ),
+                                        RadioListTile(
+                                          value: OnchainConfirmationSpeed.slow,
+                                          title: const Text('Slow'),
+                                          subtitle: Text(
+                                            'Spark fee: ${getSatInBitcoinStyle(calculations!.onchainFeeQuote!.speedSlow.userFeeSat.i)}',
+                                          ),
+                                          secondary: AmountText(
+                                            amountSat: calculations!.onchainFeeQuote!.speedSlow.l1BroadcastFeeSat.i,
+                                            showFiat: true,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
                       ],
                     ),
                   ),
@@ -628,16 +721,12 @@ class _SendScreenState extends State<SendScreen> {
                         ? null
                         : () async {
                             final wallet = selectedAccount.currentWallet;
-                            if (wallet.type == WalletType.watchOnly) {
-                              ToastService.show('You cannot spend from a watch-only wallet.');
-                              return;
-                            }
 
                             await rebuildFees();
                             if (calculations == null) {
                               return ToastService.show('Failed to calculate fees and swap amount.');
                             }
-                            if (calculations!.totalSpend > wallet.balance) {
+                            if (calculations!.sendAmount > wallet.balance) {
                               return ToastService.show('Insufficient balance!');
                             }
 
@@ -653,27 +742,22 @@ class _SendScreenState extends State<SendScreen> {
                               startLoader();
                               // reset the last swap of payment data if amount or address is changed
                               if (paymentData?.calculation.sendAmount != amount ||
-                                  paymentData?.userEnteredAddress != addressText) {
+                                  paymentData?.addressData.address != addressData.address) {
                                 paymentData = null;
                               }
-                              final memo = memoController.text.trim();
+                              final comment = commentController.text.trim();
                               paymentData ??= await TransactionService.createPayOut(
                                 account: selectedAccount,
                                 calculation: calculations!,
-                                addressData: AddressData(
-                                  addressType: addressType,
-                                  address: addressText,
-                                  amount: amount,
-                                  lockAmount: lockAmount,
-                                  memo: memo.isEmpty ? null : memo,
-                                ),
+                                addressData: addressData,
                                 sendAll: sendAll,
                                 receiverContact: receiverDetail,
+                                comment: comment.isNotEmpty && !lockComment ? comment : null,
                                 note: noteController.text.trim(),
                                 categories: selectedCategory,
+                                brantaData: brantaData,
                               );
                               if (paymentData != null) {
-                                await receiverDetail?.save();
                                 if (context.mounted) {
                                   unawaited(
                                     showModalBottomSheet(
@@ -686,9 +770,7 @@ class _SendScreenState extends State<SendScreen> {
                                         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
                                       ),
                                       routeSettings: const RouteSettings(name: 'ConfirmPaymentBottomSheet'),
-                                      builder: (context) => ConfirmPaymentBottomSheet(
-                                        paymentData: paymentData!.copyWith(brantaData: Nullable(brantaData)),
-                                      ),
+                                      builder: (context) => ConfirmPaymentBottomSheet(paymentData: paymentData!),
                                     ),
                                   );
                                 }
@@ -716,7 +798,7 @@ class _SendScreenState extends State<SendScreen> {
     );
   }
 
-  Future<void> processAddress(String address, {bool isRecursive = false}) async {
+  Future<void> processAddress(String address, {int? defaultAmount, bool isRecursive = false}) async {
     await addressProcessor
         .run(() async {
           brantaData = null;
@@ -724,50 +806,59 @@ class _SendScreenState extends State<SendScreen> {
           lockAmount = false;
           amount = 0;
           originalAmount = 0;
-          memoController.text = '';
+          commentController.text = '';
           satAmountController.text = '';
           fiatAmountController.text = '';
           receiverDetail = widget.contact;
           addressController.value = addressController.value.copyWith(text: address);
 
           try {
-            final data = await TransactionService.processAddress(rawAddress: address, network: Config.network);
-            if (data.addressType == AddressType.bolt12Offer) {
-              final res = await decodeBolt12Offer(offer: data.address);
+            addressData = await TransactionService.processAddress(rawAddress: address, network: Config.network);
+            if (addressData.amount == 0) {
+              addressData = addressData.copyWith(amount: defaultAmount);
+            }
+
+            if (addressData.addressType == AddressType.bolt12Offer) {
+              final res = await Crypto.decodeBolt12Offer(offer: addressData.address);
               bolt12Issuer = res.issuer ?? res.description;
-            } else if (data.addressType == AddressType.bolt12Invoice) {
-              final res = decodeBolt12Invoice(invoice: data.address);
+            } else if (addressData.addressType == AddressType.bolt12Invoice) {
+              final res = Crypto.decodeBolt12Invoice(invoice: addressData.address);
               if (res.issuer != null) {
                 bolt12Issuer = res.issuer;
               }
+            } else if (addressData.addressType == AddressType.spark) {
+              final (identityKey, network) = Crypto.decodeSparkAddress(addr: addressData.address);
+              if (network == Config.network) {
+                receiverDetail ??= await DbService.getContact(identityKey: identityKey);
+              }
             }
-            addressType = data.addressType;
 
-            if (addressType != AddressType.unknown) {
+            if (addressData.addressType != AddressType.unknown) {
               sendAll = false;
-              addressController.value = addressController.value.copyWith(text: data.address);
+              addressController.value = addressController.value.copyWith(text: addressData.address);
               if (mounted) {
                 FocusScope.of(context).unfocus();
               }
 
-              if (data.amount > 0) {
-                originalAmount = amount = data.amount;
+              if (addressData.amount > 0) {
+                originalAmount = amount = addressData.amount;
                 satAmountController.text = amount.toStringAsFixed(0);
                 fiatAmountController.text = amount.satsToFiat().toStringAsFixed(2);
-                memoController.text = data.memo?.trim() ?? '';
-                lockAmount = data.lockAmount;
-                lockMemo = lockAmount && memoController.text.trim().isNotEmpty;
+                commentController.text = addressData.comment?.trim() ?? '';
+                lockAmount = addressData.lockAmount;
+                lockComment = lockAmount && commentController.text.trim().isNotEmpty;
               }
-              if (data.addressType == AddressType.lnurl) {
-                if (data.address.isMannaUserName && (data.address.getUserName?.isNotEmpty ?? false)) {
-                  receiverDetail ??= await DbService.getContact(userName: data.address.getUserName!);
+
+              if (addressData.addressType == AddressType.lnurl) {
+                if (addressData.address.isMannaUserName && (addressData.address.getUserName?.isNotEmpty ?? false)) {
+                  receiverDetail ??= await DbService.getContact(userName: addressData.address.getUserName!);
                 } else {
-                  receiverDetail ??= await NostrService.fetchUserData(data.address, selectedWallet);
+                  receiverDetail ??= await NostrService.fetchUserData(addressData.address, selectedWallet);
                 }
               }
 
               // Branta
-              if ({AddressType.bolt11Invoice, AddressType.bitcoin}.contains(addressType)) {
+              if ({AddressType.bolt11Invoice, AddressType.bitcoin}.contains(addressData.addressType)) {
                 const options = BrantaClientOptions(baseUrl: BrantaServerBaseUrl.production);
                 final service = BrantaService(
                   client: BrantaClient(httpClient: http.Client(), defaultOptions: options),
@@ -804,7 +895,7 @@ class _SendScreenState extends State<SendScreen> {
           // and we failed to validate address
           final currentInput = addressController.text.trim();
           if (!isRecursive &&
-              addressType == AddressType.unknown &&
+              addressData.addressType == AddressType.unknown &&
               currentInput.isUserName &&
               address != currentInput) {
             processAddress(currentInput, isRecursive: true);
@@ -816,17 +907,21 @@ class _SendScreenState extends State<SendScreen> {
 
   ({String mannaUsername, String address})? mannaUserLiquidAddressCache;
 
-  Future<void> rebuildFees() async {
-    if (addressType == AddressType.unknown) {
+  Timer? onChainFeeQuoteTimer;
+  Future<void> rebuildFees({bool isRecursive = false}) async {
+    if (addressData.addressType == AddressType.unknown) {
       calculations = null;
       return;
     }
 
+    onChainFeeQuoteTimer?.cancel();
+    onChainFeeQuoteTimer = null;
+
     final address = addressController.text.trim();
-    if (addressType == AddressType.lnurl && address.isMannaUserName) {
+    if (addressData.addressType == AddressType.lnurl && address.isMannaUserName) {
       final userName = address.getUserName;
       if (userName != null && mannaUserLiquidAddressCache?.mannaUsername != userName) {
-        final liquidAddress = await DbService.getWalletLiquidAddress(userName);
+        final liquidAddress = await DbService.getSparkAddress(userName);
         if (liquidAddress != null) {
           mannaUserLiquidAddressCache = (mannaUsername: userName, address: liquidAddress);
         }
@@ -842,23 +937,45 @@ class _SendScreenState extends State<SendScreen> {
       amount = selectedWallet.balance;
       satAmountController.text = amount.toStringAsFixed(0);
       fiatAmountController.text = amount.satsToFiat().toStringAsFixed(2);
+      update();
     }
 
+    final comment = commentController.text.trim();
     update(() => isBuildingFees = true);
     calculations = await calculateFeeAndAmounts(
       wallet: wallet,
       amount: amount,
-      type: switch (addressType) {
-        AddressType.lnurl => address.isMannaUserName ? TraType.lbtcToLbtcSend : TraType.lbtcToLN,
-        AddressType.bitcoin => TraType.lbtcToBtc,
-        AddressType.liquid => TraType.lbtcToLbtcSend,
-        AddressType.bolt11Invoice || AddressType.bolt12Invoice || AddressType.bolt12Offer => TraType.lbtcToLN,
-        AddressType.unknown => throw UnimplementedError(),
-      },
-      address: addressType == AddressType.lnurl ? mannaUserLiquidAddressCache?.address : address,
-      isSendAll: sendAll,
+      addressData: addressData.copyWith(
+        address: addressData.addressType == AddressType.lnurl
+            ? mannaUserLiquidAddressCache?.address ?? address
+            : address,
+        comment: Nullable(comment.isNotEmpty && !lockComment ? comment : null),
+      ),
+
+      amountExcludesFee: !sendAll,
+      alreadySelectedSpeed: calculations?.btcFeeRate,
     );
     update(() => isBuildingFees = false);
+
+    if ((calculations?.onchainFeeQuote?.expiresAt.i ?? 0) > 0) {
+      final duration = DateTime.fromMillisecondsSinceEpoch(
+        calculations!.onchainFeeQuote!.expiresAt.i * 1000,
+      ).difference(DateTime.now()).abs();
+      onChainFeeQuoteTimer = Timer(duration, () {
+        rebuildFees();
+      });
+    }
+
+    if (!lockAmount && (calculations?.sendAmount ?? 0) >= wallet.balance && wallet.balance > 0 && !isRecursive) {
+      if (!sendAll) {
+        ToastService.show('Sending all, because the amount exceeds wallet balance.');
+      }
+      sendAll = true;
+      amount = selectedWallet.balance;
+      satAmountController.text = amount.toStringAsFixed(0);
+      fiatAmountController.text = amount.satsToFiat().toStringAsFixed(2);
+      await rebuildFees(isRecursive: true);
+    }
   }
 }
 

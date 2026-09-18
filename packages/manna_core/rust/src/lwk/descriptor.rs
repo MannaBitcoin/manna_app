@@ -1,9 +1,9 @@
 use super::error::LwkError;
-use crate::util::Network;
 use lwk_signer::SwSigner;
 use lwk_wollet::WolletDescriptor;
 use lwk_wollet::elements_miniscript::descriptor::checksum::desc_checksum;
 use lwk_wollet::elements_miniscript::{DescriptorPublicKey, ForEachKey};
+use crate::types::Network;
 
 pub struct Descriptor {}
 

@@ -52,7 +52,7 @@ class _ContactScreenState extends State<ContactScreen> with SingleTickerProvider
 
   int pageIndex = 0;
   final pageController = PageController();
-  late final tabController = TabController(length: selectedWallet.type == WalletType.watchOnly ? 2 : 3, vsync: this);
+  late final tabController = TabController(length: 3, vsync: this);
   StreamSubscription? conversationSubscription;
   final Map<String, DateTime> contactSortOrder = {};
 
@@ -84,7 +84,7 @@ class _ContactScreenState extends State<ContactScreen> with SingleTickerProvider
     }
     for (final tx in DB.transactions.values) {
       if (tx.walletId != currentWalletId) continue;
-      final txTime = tx.txTimestamp;
+      final txTime = tx.timestamp;
 
       // holy heck, don't touch these condition
       final senderId = contactIdMap[tx.senderUUID];
@@ -307,7 +307,7 @@ class _ContactScreenState extends State<ContactScreen> with SingleTickerProvider
       ),
       body: Column(
         children: [
-          if (pageIndex != (selectedWallet.type == WalletType.watchOnly ? 1 : 2))
+          if (pageIndex != 2)
             Padding(
               padding: const EdgeInsets.all(16) - const EdgeInsets.only(bottom: 16),
               child: TextFormField(

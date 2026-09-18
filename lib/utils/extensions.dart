@@ -4,8 +4,8 @@ import 'package:convert/convert.dart';
 import 'package:dio/dio.dart';
 import 'package:manna/config.dart';
 import 'package:manna/services/log_service.dart';
-import 'package:manna/utils/parser.dart';
 import 'package:manna_core/manna_core.dart';
+import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart' as spark;
 
 import 'constants.dart';
 
@@ -51,15 +51,6 @@ extension StringExtensions on String {
   ).hasMatch(this);
 }
 
-extension StringToSwapStatus on String {
-  SubSwapStatus get toSubStatus => parseEnum(SubSwapStatus.dataValues(), this, unknownValue: SubSwapStatus.created);
-
-  RevSwapStatus get toRevStatus => parseEnum(RevSwapStatus.dataValues(), this, unknownValue: RevSwapStatus.created);
-
-  ChainSwapStatus get toChainStatus =>
-      parseEnum(ChainSwapStatus.dataValues(), this, unknownValue: ChainSwapStatus.created);
-}
-
 extension Uint8ListExtension on Uint8List {
   String get toHexString => hex.encode(this);
 
@@ -72,4 +63,18 @@ extension DioResExtension on Response {
 
 extension CaseInsesitiveQueryExtension on Uri {
   String? getQueryParam(String key) => queryParameters[key.toUpperCase()] ?? queryParameters[key.toLowerCase()];
+}
+
+extension SparkNetworkExtension on Network {
+  spark.Network get to => switch (this) {
+    Network.mainnet => spark.Network.mainnet,
+    Network.regtest => spark.Network.regtest,
+    Network.testnet => throw UnimplementedError(),
+  };
+
+  spark.BitcoinNetwork get toBTC => switch (this) {
+    Network.mainnet => spark.BitcoinNetwork.bitcoin,
+    Network.regtest => spark.BitcoinNetwork.regtest,
+    Network.testnet => spark.BitcoinNetwork.testnet4,
+  };
 }

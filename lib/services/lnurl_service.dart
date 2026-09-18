@@ -3,19 +3,18 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart' show PaymentType, PaymentDetails_Lightning;
 import 'package:convert/convert.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:manna/globals.dart';
 import 'package:manna/models/account.dart';
-import 'package:manna/models/enums.dart';
 import 'package:manna/models/misc.dart';
 import 'package:manna/models/transaction.dart';
 import 'package:manna/router.dart';
 import 'package:manna/services/db.dart';
 import 'package:manna/services/log_service.dart';
 import 'package:manna/services/transaction_service.dart';
-import 'package:manna/utils/constants.dart';
 import 'package:manna/utils/extensions.dart';
 import 'package:manna/utils/parser.dart';
 import 'package:manna/utils/state_extension.dart';
@@ -50,7 +49,12 @@ class LnurlAuthService {
         postFrameCallBack(
           () => showDialog(
             context: AppRouter.navigatorContext,
-            builder: (context) => LNURLAuthDialog(uri: uri!),
+            builder: (context) => LNURLAuthDialog(
+              uri: uri!,
+              service: uri.host,
+              k1: uri.queryParameters['k1']!,
+              action: uri.queryParameters['action'],
+            ),
           ),
         );
         // this return is to notify caller that schema is correct for LNURL auth.
@@ -60,14 +64,16 @@ class LnurlAuthService {
     return false;
   }
 
-  static Future<void> onLNURLAuth(Account account, Uri uri) async {
+  static Future<void> onLNURLAuth({
+    required Account account,
+    required Uri uri,
+    required String service,
+    required String k1Hex,
+  }) async {
     if (!await account.hasMnemonic) {
       return ToastService.show('Watch only wallets cannot be used for logins.');
     }
     try {
-      final k1Hex = uri.queryParameters['k1'].toString();
-      final service = uri.host;
-
       startLoader();
       final mnemonic = await account.getMnemonicSentence();
       if (mnemonic == null) return;
@@ -132,6 +138,7 @@ class LnurlAuthService {
 }
 
 class LnurlWithdrawService {
+  // TODO replace this
   /// returns true if string is valid LNURLW
   static Future<bool> handleLNURLW({required String rawAddress, Map<String, dynamic>? data}) async {
     Uri? uri = Uri.tryParse(rawAddress.trim().toLowerCase());
@@ -172,7 +179,6 @@ class LnurlWithdrawService {
         final res = await showDialog(
           context: AppRouter.navigatorContext,
           builder: (context) => LNURLWithdrawDialog(
-            serviceName: uri!.host,
             callback: callback,
             k1: k1,
             minWithdrawable: minWithdrawable.floor(),
@@ -224,126 +230,18 @@ Future<Map<String, dynamic>> callLNURL(Uri uri) async {
   throw AddressParsingException('Invalid LNURL');
 }
 
-Future<AddressData?> handleLNURL({
-  required String rawAddress,
-  required Network network,
-  bool validateOnly = false,
-}) async {
-  final address = rawAddress.trim().toLowerCase();
-  Uri lnurlToHttpScheme(Uri uri) => uri.replace(scheme: uri.host.endsWith('onion') ? 'http' : 'https');
-
-  String? convertPayReqURIToUserName(Uri uri) {
-    if (uri.host.isNotEmpty &&
-        uri.queryParameters.isEmpty &&
-        uri.pathSegments.length == 3 &&
-        uri.pathSegments[0] == '.well-known' &&
-        uri.pathSegments[1] == 'lnurlp') {
-      return '${uri.pathSegments[2]}@${uri.host}';
-    }
-    return null;
-  }
-
-  // if username convert it to LNURL format
-  if (address.isUserName) {
-    final data = AddressData(addressType: AddressType.lnurl, address: address);
-    if (validateOnly) return data;
-
-    try {
-      final match = Regexes.internetAddress.firstMatch(address);
-      final username = match?.group(1);
-      final domain = match?.group(2);
-      if (username != null && domain != null) {
-        final lnurlData = await callLNURL(Uri.parse('https://$domain/.well-known/lnurlp/$username'));
-        return data.copyWith(lnurlData: Nullable(lnurlData));
-      }
-    } catch (_) {}
-
-    // username: bolt12
-    if ((await fetchBolt12OfferUriFromUsername(network: network, username: address)) != null) {
-      return data;
-    }
-  }
-
-  final uri = Uri.tryParse(address);
-  if (uri == null) {
-    return null;
-  }
-
-  final validateData = AddressData(addressType: AddressType.lnurl, address: address);
-  if (uri.scheme == 'lnurlw') {
-    if (validateOnly) return validateData;
-    if (await LnurlWithdrawService.handleLNURLW(rawAddress: lnurlToHttpScheme(uri).toString())) {
-      return null;
-    }
-    throw AddressParsingException('Invalid LNURLW format!');
-  } else if (uri.scheme == 'keyauth') {
-    if (validateOnly) return validateData;
-    if (await LnurlAuthService.handleLNURLAuth(lnurlToHttpScheme(uri).toString())) {
-      return null;
-    }
-    throw AddressParsingException('Invalid LNURL-Auth format!');
-  } else if (uri.scheme == 'lnurlp') {
-    if (validateOnly) return validateData;
-    final payReqUri = lnurlToHttpScheme(uri);
-    final lnurlData = await callLNURL(payReqUri);
-    return AddressData(
-      addressType: AddressType.lnurl,
-      address: convertPayReqURIToUserName(payReqUri) ?? address,
-      lnurlData: lnurlData,
-    );
-  }
-
-  // lnurl
-  if (uri.pathSegments.firstOrNull?.startsWith('lnurl') ?? false) {
-    try {
-      final decodedLNURL = LnurlUtil.decode(lnurl: uri.pathSegments.firstOrNull ?? address);
-      final lnurlUri = Uri.tryParse(decodedLNURL);
-      if (lnurlUri == null) {
-        return null;
-      }
-
-      if (validateOnly) return AddressData(addressType: AddressType.lnurl, address: address);
-
-      if (lnurlUri.queryParameters['tag'] == 'login') {
-        if (await LnurlAuthService.handleLNURLAuth(decodedLNURL)) {
-          return null;
-        }
-        throw AddressParsingException('Invalid LNURL-Auth format!');
-      } else {
-        final lnurlData = await callLNURL(lnurlUri);
-        switch (parseString(lnurlData['tag'])) {
-          case 'withdrawRequest':
-            if (await LnurlWithdrawService.handleLNURLW(rawAddress: decodedLNURL, data: lnurlData)) {
-              return null;
-            }
-            throw AddressParsingException('Invalid LNURLW format!');
-          case 'payRequest':
-            return AddressData(
-              addressType: AddressType.lnurl,
-              address: convertPayReqURIToUserName(lnurlUri) ?? address,
-              lnurlData: lnurlData,
-            );
-        }
-      }
-    } on AddressParsingException catch (_) {
-      rethrow;
-    }
-  }
-
-  return null;
-}
-
 void processLNURLSuccessActionAllTransactions() {
   DB.transactions.values
-      .where((tx) => !tx.isIncoming && tx.extraMetadata.isNotEmpty)
+      .where((tx) => tx.inner.paymentType == PaymentType.send && tx.extraMetadata.isNotEmpty)
       .map((tx) => handleLNURLSuccessAction(tx));
 }
 
 /// [PayOutData.lnurlSuccessActionData] is stored in [Transaction.extraMetadata] with key 'lnurlSuccessAction'
 /// this function calls that action if not done already.
 void handleLNURLSuccessAction(Transaction tx) async {
-  final swap = tx.linkedSwap;
-  if (swap == null || swap.submarine == null) return;
+  if (tx.inner.details is! PaymentDetails_Lightning) return;
+
+  final paymentData = tx.inner.details as PaymentDetails_Lightning;
 
   final successAction = tx.extraMetadata['lnurlSuccessAction'];
   if (successAction is Map && successAction.isNotEmpty && successAction['acted'] == null) {
@@ -355,7 +253,7 @@ void handleLNURLSuccessAction(Transaction tx) async {
             await showDialog(
               context: AppRouter.navigatorContext,
               builder: (context) => AlertDialog(
-                title: Text('Invoice ${swap.submarine!.invoice.shortenAddress()} paid.'),
+                title: Text('Invoice ${paymentData.invoice.shortenAddress()} paid.'),
                 content: Text(message),
                 actions: [TextButton(onPressed: () => AppRouter.pop(), child: const Text('Ok'))],
               ),
@@ -372,7 +270,7 @@ void handleLNURLSuccessAction(Transaction tx) async {
           await showDialog(
             context: AppRouter.navigatorContext,
             builder: (context) => AlertDialog(
-              title: Text('Invoice ${swap.submarine!.invoice.shortenAddress()} paid.'),
+              title: Text('Invoice ${paymentData.invoice.shortenAddress()} paid.'),
               content: Column(
                 children: [
                   Text(description),
@@ -398,7 +296,7 @@ void handleLNURLSuccessAction(Transaction tx) async {
           extraMetadata: tx.extraMetadata.update('lnurlSuccessAction', (value) => {...successAction, 'acted': true}),
         );
       case 'aes':
-        final preimage = swap.preimage.value;
+        final preimage = paymentData.htlcDetails.preimage ?? '';
         if (preimage.isEmpty) return;
 
         try {
@@ -423,7 +321,7 @@ void handleLNURLSuccessAction(Transaction tx) async {
             await showDialog(
               context: AppRouter.navigatorContext,
               builder: (context) => AlertDialog(
-                title: Text('Invoice ${swap.submarine!.invoice.shortenAddress()} paid.'),
+                title: Text('Invoice ${paymentData.invoice.shortenAddress()} paid.'),
                 content: Column(
                   children: [
                     Text(description),

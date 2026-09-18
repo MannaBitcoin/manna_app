@@ -1,13 +1,27 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
+import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart'
+    show
+        PaymentType,
+        PaymentStatus,
+        PaymentDetails_Lightning,
+        SuccessActionProcessed_Message,
+        SuccessActionProcessed_Url,
+        SuccessActionProcessed_Aes,
+        AesSuccessActionDataResult_Decrypted,
+        AesSuccessActionDataResult_ErrorStatus,
+        PaymentDetails_Spark,
+        PaymentDetails_Token,
+        PaymentDetails_Withdraw,
+        PaymentDetails_Deposit;
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 import 'package:manna/app_state.dart';
 import 'package:manna/globals.dart';
 import 'package:manna/models/contact.dart';
 import 'package:manna/models/misc.dart';
-import 'package:manna/models/swap.dart';
 import 'package:manna/models/transaction.dart';
 import 'package:manna/router.dart';
 import 'package:manna/screens/contact_detail_screen.dart';
@@ -21,25 +35,19 @@ import 'package:manna/services/nostr_service.dart';
 import 'package:manna/services/transaction_service.dart';
 import 'package:manna/theme.dart';
 import 'package:manna/utils/constants.dart';
-import 'package:manna/utils/date_extension.dart';
 import 'package:manna/utils/extensions.dart';
-import 'package:manna/utils/parser.dart';
-
 import 'package:manna/utils/state_extension.dart';
 import 'package:manna/widgets/amount_text.dart';
 import 'package:manna/widgets/bottom%20sheets/transaction_categories_bottom_sheet.dart';
-import 'package:manna/widgets/swap_data_card.dart';
-import 'package:manna_core/manna_core.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'package:uuid/uuid.dart';
 
 class TransactionDetailScreen extends StatefulWidget {
-  const TransactionDetailScreen({required this.id, this.fromCompletedTx = false, this.submarineSwapId, super.key});
+  const TransactionDetailScreen({required this.id, this.fromCompletedTx = false, super.key});
 
   final IdWithWallet id;
   final bool fromCompletedTx;
-  final String? submarineSwapId;
 
   @override
   State<TransactionDetailScreen> createState() => _TransactionDetailScreenState();
@@ -53,22 +61,13 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> with 
   late final progressAnimationController = AnimationController(vsync: this);
   late final circleAnim = CurvedAnimation(parent: animationController, curve: Curves.easeOutCubic);
   Timer? swapCheckerTimer;
-  StreamSubscription? swapSubscription;
-  StreamSubscription? transactionSubscription;
 
   bool isCompleted = true;
-
-  late final linkedSwap = DB.transactions[widget.id]!.linkedSwap;
 
   @override
   void initState() {
     if (DB.transactions[widget.id] == null) {
       AppRouter.pop();
-    } else {
-      transactionSubscription = DB.transactionBox.watch(key: widget.id.toString()).listen((_) => update());
-      if (linkedSwap != null) {
-        swapSubscription = DB.swaps.box.watch(key: linkedSwap!.id).listen((_) => update());
-      }
     }
     if (widget.fromCompletedTx) {
       playSuccessAnimation();
@@ -87,8 +86,6 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> with 
 
   @override
   void dispose() {
-    swapSubscription?.cancel();
-    transactionSubscription?.cancel();
     swapCheckerTimer?.cancel();
     circleAnim.dispose();
     animationController.dispose();
@@ -104,7 +101,7 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> with 
     if (contact == null && (tx.senderUUID != null || tx.receiverUserNameOrUUID != null)) {
       final wallets = DB.allWallets.where((w) => w.uuid == tx.walletId);
       for (final wallet in wallets) {
-        if (tx.isIncoming) {
+        if (tx.inner.paymentType == PaymentType.receive) {
           if (tx.senderUUID != null) {
             contact =
                 DB.contacts[IdWithWalletAndType.wallet(id: tx.senderUUID!, wallet: wallet)] ??
@@ -134,56 +131,49 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> with 
         update();
       }
     }
-    if (tx.memo.isEmpty && linkedSwap?.note?.isNotEmpty == true) {
-      await tx.update(memo: linkedSwap!.note!, isMemoSynced: true);
-    }
   });
 
   Future<void> playSuccessAnimation() async {
-    if (widget.submarineSwapId != null && DB.swaps[widget.submarineSwapId!] != null) {
-      void complete({required bool isSuccess}) async {
-        await progressAnimationController.animateTo(1, duration: const Duration(milliseconds: 500));
-        update(() => isCompleted = true);
-        if (isSuccess) {
-          await AudioService.playSuccess();
+    void complete({required bool isSuccess}) async {
+      await progressAnimationController.animateTo(1, duration: const Duration(milliseconds: 500));
+      update(() => isCompleted = true);
+      if (isSuccess) {
+        await AudioService.playSuccess();
 
-          handleLNURLSuccessAction(tx);
-        }
-        if (mounted) {
-          Future.delayed(const Duration(seconds: 1), () => animationController.reverse());
-        }
+        handleLNURLSuccessAction(tx);
       }
-
-      isCompleted = false;
-      await animationController.forward(from: 0);
-      // gradually forward animation and once the swap complete reverse and play audio for lightning payment
-      // we prolong the animation to 30 seconds so every tick is 300 millis * 100 ticks = 30000ms
-      swapCheckerTimer = Timer.periodic(const Duration(milliseconds: 300), (timer) {
-        if (timer.tick > 100) {
-          timer.cancel();
-          complete(isSuccess: false);
-        } else if (timer.isActive) {
-          if (isSwapCompleted) {
-            timer.cancel();
-            complete(isSuccess: true);
-          } else {
-            final progress = Curves.easeOutQuart.transform(timer.tick / 100);
-            progressAnimationController.animateTo(progress, duration: const Duration(milliseconds: 300));
-          }
-        }
-      });
-    } else {
-      // in all other case complete animation immediately.
-      await AudioService.playSuccess();
-      await animationController.forward();
-      await Future.delayed(const Duration(milliseconds: 1800));
       if (mounted) {
-        await animationController.reverse();
+        Future.delayed(const Duration(seconds: 1), () => animationController.reverse());
       }
     }
-  }
 
-  bool get isSwapCompleted => DB.swaps[widget.submarineSwapId ?? '']?.isClosed == true;
+    isCompleted = false;
+    await animationController.forward(from: 0);
+    // gradually forward animation and once the swap complete reverse and play audio for lightning payment
+    // we prolong the animation to 30 seconds so every tick is 300 millis * 100 ticks = 30000ms
+    swapCheckerTimer = Timer.periodic(const Duration(milliseconds: 300), (timer) {
+      if (timer.tick > 100) {
+        timer.cancel();
+        complete(isSuccess: false);
+      } else if (timer.isActive) {
+        if (tx.inner.status != PaymentStatus.pending) {
+          timer.cancel();
+          complete(isSuccess: tx.inner.status == PaymentStatus.completed);
+        } else {
+          final progress = Curves.easeOutQuart.transform(timer.tick / 100);
+          progressAnimationController.animateTo(progress, duration: const Duration(milliseconds: 300));
+        }
+      }
+    });
+
+    // // in all other case complete animation immediately.
+    // await AudioService.playSuccess();
+    // await animationController.forward();
+    // await Future.delayed(const Duration(milliseconds: 1800));
+    // if (mounted) {
+    //   await animationController.reverse();
+    // }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -241,6 +231,7 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> with 
               mainAxisSize: MainAxisSize.min,
               children: [
                 TextFormField(
+                  autofocus: true,
                   controller: noteController,
                   decoration: const InputDecoration(hintText: 'Note'),
                   textCapitalization: TextCapitalization.sentences,
@@ -338,15 +329,17 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> with 
                             ConstrainedBox(
                               constraints: const BoxConstraints(maxWidth: 300),
                               child: Lottie.asset(
-                                widget.submarineSwapId != null && !isSwapCompleted
-                                    ? AppLottie.pending
-                                    : AppLottie.success,
+                                switch (tx.inner.status) {
+                                  PaymentStatus.pending => AppLottie.pending,
+                                  PaymentStatus.completed => AppLottie.success,
+                                  PaymentStatus.failed => AppLottie.failed,
+                                },
                                 width: double.infinity,
-                                repeat: widget.submarineSwapId != null && !isSwapCompleted,
+                                repeat: tx.inner.status == PaymentStatus.pending,
                               ),
                             ),
                             AmountText(
-                              amountSat: tx.amount,
+                              amountSat: tx.inner.amount.i + tx.inner.fees.i,
                               btcStyle: const TextStyle(
                                 fontSize: 36,
                                 fontWeight: FontWeight.w700,
@@ -361,7 +354,10 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> with 
                                 alignment: WrapAlignment.center,
                                 crossAxisAlignment: WrapCrossAlignment.center,
                                 children: [
-                                  Text('${tx.isIncoming ? 'From' : 'To'} ', style: const TextStyle(fontSize: 16)),
+                                  Text(
+                                    '${tx.inner.paymentType == PaymentType.receive ? 'From' : 'To'} ',
+                                    style: const TextStyle(fontSize: 16),
+                                  ),
                                   GestureDetector(
                                     onTap: () => AppRouter.push(ContactDetailScreen(contact: contact!)),
                                     child: Text(
@@ -417,15 +413,6 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> with 
                                 ],
                               ),
                             ),
-                            const SizedBox(height: 8),
-                            Text(
-                              tx.confirmationTimestamp == null
-                                  ? 'Transaction not confirmed yet!'
-                                  : tx.confirmationTimestamp?.format() ?? '',
-                              style: TextStyle(
-                                color: context.themedColor(bright: Colors.black54, dark: Colors.white54),
-                              ),
-                            ),
                           ],
                         ),
                         const SizedBox(height: 16),
@@ -443,134 +430,112 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> with 
                                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                                 ),
                                 children: [
-                                  if (tx.liquidTx != null) ...[
-                                    if (linkedSwap == null) ...[
-                                      if (!tx.isIncoming)
-                                        _detailRow(
-                                          Icons.account_balance_wallet,
-                                          'Actual Amount',
-                                          AmountText(
-                                            showFiat: true,
-                                            amountSat: tx.amount.abs() - (tx.liquidTx!.fee.toInt()) - tx.mannaFees(),
-                                            atTime: tx.txTimestamp,
-                                          ),
-                                        ),
-                                      if (tx.mannaFees() > 0)
-                                        _detailRow(
-                                          Icons.toll,
-                                          'Manna fee',
-                                          AmountText(showFiat: true, amountSat: tx.mannaFees(), atTime: tx.txTimestamp),
-                                        ),
-                                      _detailRow(
-                                        Icons.hub,
-                                        'Network fees',
-                                        AmountText(amountSat: tx.liquidTx?.fee.toInt() ?? 0, atTime: tx.txTimestamp),
-                                      ),
-                                    ] else ...[
-                                      _detailRow(
-                                        Icons.account_balance_wallet,
-                                        'Actual Amount',
-                                        AmountText(
-                                          showFiat: true,
-                                          amountSat: linkedSwap!.receiveAmount.toInt(),
-                                          atTime: tx.txTimestamp,
-                                        ),
-                                      ),
-                                      ExpansionTile(
-                                        tilePadding: EdgeInsets.zero,
-                                        shape: InputBorder.none,
-                                        showTrailingIcon: false,
-                                        title: _detailRow(
-                                          Icons.money_off,
-                                          'Total Fees',
-                                          AmountText(
-                                            showFiat: true,
-                                            amountSat:
-                                                tx.mannaFees() +
-                                                (linkedSwap!.boltzFee?.i ?? 0) +
-                                                (linkedSwap!.boltzNetworkFee) +
-                                                (tx.liquidTx?.fee.toInt() ?? 0),
-                                            atTime: tx.txTimestamp,
-                                          ),
-                                        ),
-                                        childrenPadding: const EdgeInsets.only(left: 32),
-                                        children: [
-                                          _detailRow(
-                                            Icons.hub,
-                                            'Network fees',
-                                            AmountText(
-                                              showFiat: true,
-                                              amountSat: tx.liquidTx?.fee.toInt() ?? 0,
-                                              atTime: tx.txTimestamp,
-                                            ),
-                                            expand: false,
-                                          ),
-                                          _detailRow(
-                                            Icons.offline_bolt,
-                                            'Boltz fees',
-                                            AmountText(
-                                              showFiat: true,
-                                              amountSat: (linkedSwap!.boltzFee?.i ?? 0) + (linkedSwap!.boltzNetworkFee),
-                                              atTime: tx.txTimestamp,
-                                            ),
-                                            expand: false,
-                                          ),
-                                          if (tx.mannaFees() > 0)
-                                            _detailRow(
-                                              Icons.toll,
-                                              'Manna fee',
-                                              AmountText(
-                                                showFiat: true,
-                                                amountSat: tx.mannaFees(),
-                                                atTime: tx.txTimestamp,
-                                              ),
-                                              expand: false,
-                                            ),
-                                        ],
-                                      ),
-                                    ],
-                                    if (tx.liquidTx?.height != null)
-                                      _detailRow(Icons.height, 'Height', tx.liquidTx!.height!.toString()),
-                                    _detailRow(Icons.scale, 'Size', '${tx.liquidTx!.vsize} vB'),
-                                  ],
-                                  if (tx.extraMetadata['lnurlSuccessAction'] is Map &&
-                                      (tx.extraMetadata['lnurlSuccessAction'] as Map).isNotEmpty)
-                                    Builder(
-                                      builder: (context) {
-                                        final lnurlSuccessAction = (tx.extraMetadata['lnurlSuccessAction'] as Map)
-                                            .cast<String, dynamic>();
-                                        final url = parseString(lnurlSuccessAction['url']);
-                                        final plainText = parseString(lnurlSuccessAction['plainText']);
-                                        final desc = parseString(lnurlSuccessAction['description']);
+                                  if (tx.inner.paymentType == PaymentType.send)
+                                    _detailRow(
+                                      Icons.account_balance_wallet,
+                                      'Actual Amount',
+                                      AmountText(showFiat: true, amountSat: tx.inner.amount.i, atTime: tx.timestamp),
+                                    ),
 
-                                        if (url.isEmpty && plainText.isEmpty && desc.isEmpty) {
-                                          return const SizedBox.shrink();
-                                        }
+                                  _detailRow(
+                                    Icons.toll,
+                                    'Fees',
+                                    AmountText(showFiat: true, amountSat: tx.inner.fees.i, atTime: tx.timestamp),
+                                  ),
 
-                                        return Column(
-                                          spacing: 8,
-                                          children: [
-                                            const Text('LNURL data', style: TextStyle(fontSize: 16)),
-                                            const Divider(),
-                                            if (url.isNotEmpty)
-                                              GestureDetector(
-                                                onTap: () => launchUrlString(url),
-                                                child: Text(
-                                                  url,
-                                                  style: TextStyle(
-                                                    decoration: TextDecoration.underline,
-                                                    color: Colors.blue.shade600,
-                                                    decorationColor: Colors.blue.shade600,
+                                  // ExpansionTile(
+                                  //   tilePadding: EdgeInsets.zero,
+                                  //   shape: InputBorder.none,
+                                  //   showTrailingIcon: false,
+                                  //   title: _detailRow(
+                                  //     Icons.money_off,
+                                  //     'Total Fees',
+                                  //     AmountText(showFiat: true, amountSat: tx.inner.fees.i, atTime: tx.timestamp),
+                                  //   ),
+                                  //   childrenPadding: const EdgeInsets.only(left: 32),
+                                  //   children: [
+                                  //     _detailRow(
+                                  //       Icons.offline_bolt,
+                                  //       'Fees',
+                                  //       AmountText(showFiat: true, amountSat: tx.inner.fees.i, atTime: tx.timestamp),
+                                  //       expand: false,
+                                  //     ),
+                                  //   ],
+                                  // ),
+                                  if (tx.inner.details case PaymentDetails_Lightning(:final lnurlPayInfo))
+                                    if (lnurlPayInfo?.processedSuccessAction != null)
+                                      Builder(
+                                        builder: (context) {
+                                          final widgets = switch (lnurlPayInfo!.processedSuccessAction!) {
+                                            SuccessActionProcessed_Aes(:final result) => switch (result) {
+                                              AesSuccessActionDataResult_Decrypted(:final data) => [
+                                                if (data.description.isNotEmpty) Text(data.description),
+                                                if (data.plaintext.isNotEmpty)
+                                                  Text(data.plaintext, style: const TextStyle(fontSize: 16)),
+                                              ],
+                                              AesSuccessActionDataResult_ErrorStatus(:final reason) => [
+                                                Text(reason, style: const TextStyle(color: Colors.red)),
+                                              ],
+                                            },
+                                            SuccessActionProcessed_Message(:final data) => <Widget>[
+                                              Text(data.message, style: const TextStyle(fontSize: 16)),
+                                            ],
+                                            SuccessActionProcessed_Url(:final data) => <Widget>[
+                                              if (data.description.isNotEmpty) Text(data.description),
+                                              if (data.url.isNotEmpty)
+                                                GestureDetector(
+                                                  onTap: () async {
+                                                    if (!data.matchesCallbackDomain) {
+                                                      final res = await showDialog(
+                                                        context: context,
+                                                        builder: (context) => AlertDialog(
+                                                          title: const Text(
+                                                            'The URL does not match the original LNURL, Do you still want to continue?',
+                                                            style: TextStyle(fontSize: 16),
+                                                          ),
+                                                          actions: [
+                                                            TextButton(
+                                                              onPressed: () => AppRouter.pop(false),
+                                                              child: const Text('No'),
+                                                            ),
+                                                            TextButton(
+                                                              onPressed: () => AppRouter.pop(true),
+                                                              child: const Text('Yes'),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      );
+                                                      if (res is bool && res) {
+                                                        unawaited(launchUrlString(data.url));
+                                                      }
+                                                    } else {
+                                                      unawaited(launchUrlString(data.url));
+                                                    }
+                                                  },
+                                                  child: Text(
+                                                    data.url,
+                                                    style: TextStyle(
+                                                      decoration: TextDecoration.underline,
+                                                      color: Colors.blue.shade600,
+                                                      decorationColor: Colors.blue.shade600,
+                                                    ),
                                                   ),
                                                 ),
-                                              ),
-                                            if (desc.isNotEmpty) Text(desc),
-                                            if (plainText.isNotEmpty)
-                                              Text(plainText, style: const TextStyle(fontSize: 16)),
-                                          ],
-                                        );
-                                      },
-                                    ),
+                                            ],
+                                          };
+                                          if (widgets.isEmpty) return const SizedBox.shrink();
+
+                                          return Column(
+                                            spacing: 8,
+                                            children: [
+                                              const Text('LNURL data', style: TextStyle(fontSize: 16)),
+                                              const Divider(),
+                                              ...widgets,
+                                            ],
+                                          );
+                                        },
+                                      ),
+
                                   if (tx.extraMetadata['brantaData'] is Map &&
                                       (tx.extraMetadata['brantaData'] as Map).isNotEmpty)
                                     Builder(
@@ -578,131 +543,168 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> with 
                                         final brantaData = BrantaData.fromMap(
                                           (tx.extraMetadata['brantaData'] as Map).cast<String, dynamic>(),
                                         );
-
-                                        if (brantaData.name.isEmpty) {
-                                          return const SizedBox.shrink();
+                                        if (brantaData.name.isNotEmpty) {
+                                          return BrantaCard(data: brantaData);
                                         }
 
-                                        return BrantaCard(data: brantaData);
+                                        return const SizedBox.shrink();
                                       },
                                     ),
                                   const SizedBox(height: 8),
-                                  if (linkedSwap != null) SwapDataCard(linkedSwap!.id),
-                                  const SizedBox(height: 16),
-                                  DropdownButton(
-                                    isExpanded: true,
-                                    borderRadius: BorderRadius.circular(12),
-                                    items: AppState.blockExplorers.entries
-                                        .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
-                                        .toList(),
-                                    hint: const Text('Transaction Explorer'),
-                                    underline: Container(),
-                                    value: explorer,
-                                    onChanged: (val) async {
-                                      if (val != null) {
-                                        explorer = val;
-                                        update();
-                                      }
-                                    },
-                                  ),
+
+                                  DataTile(title: 'Transaction Type', value: tx.inner.method.name.capitalize),
                                   const SizedBox(height: 8),
+
+                                  if (tx.inner.details != null)
+                                    switch (tx.inner.details!) {
+                                      PaymentDetails_Spark(:final invoiceDetails) =>
+                                        invoiceDetails != null
+                                            ? DataTile(
+                                                title: 'Invoice',
+                                                value: invoiceDetails.invoice,
+                                                isCopyable: true,
+                                              )
+                                            : const SizedBox.shrink(),
+                                      PaymentDetails_Lightning(
+                                        :final invoice,
+                                        :final lnurlWithdrawInfo,
+                                        :final htlcDetails,
+                                      ) =>
+                                        Column(
+                                          spacing: 8,
+                                          children: [
+                                            DataTile(title: 'Invoice', value: invoice, isCopyable: true),
+                                            if (lnurlWithdrawInfo?.withdrawUrl.isNotEmpty ?? false)
+                                              DataTile(
+                                                title: 'LNURL withdraw url',
+                                                value: lnurlWithdrawInfo?.withdrawUrl,
+                                                isCopyable: true,
+                                              ),
+                                            if (htlcDetails.preimage?.isNotEmpty ?? false)
+                                              DataTile(
+                                                title: 'Preimage',
+                                                value: htlcDetails.preimage,
+                                                isCopyable: true,
+                                                isSecure: true,
+                                              ),
+                                          ],
+                                        ),
+                                      PaymentDetails_Withdraw() => const SizedBox.shrink(),
+                                      PaymentDetails_Deposit() => const SizedBox.shrink(),
+                                      PaymentDetails_Token() => const SizedBox.shrink(),
+                                    },
+                                  const SizedBox(height: 16),
+
                                   Builder(
                                     builder: (context) {
-                                      if (linkedSwap != null) {
-                                        final allSwapTx =
-                                            (linkedSwap!.chain != null
-                                                    ? linkedSwap!.transactions.where(
-                                                        (tx) => tx.chain == Chain.bitcoin && tx.isUser,
-                                                      )
-                                                    : linkedSwap!.transactions.where(
-                                                        (tx) => tx.txType != SwapTransactionType.refund && tx.isUser,
-                                                      ))
-                                                .toList()
-                                              ..sort((a, b) => a.txType.index.compareTo(b.txType.index));
-                                        if (allSwapTx.isNotEmpty) {
-                                          return SizedBox(
-                                            width: double.infinity,
-                                            child: Builder(
-                                              builder: (context) {
-                                                final swapTx = allSwapTx.last;
-                                                final url = TransactionService.generateExplorerUrl(
-                                                  explorer,
-                                                  DB.transactions.values
-                                                          .where((t) => swapTx.txId == t.txId)
-                                                          .firstOrNull
-                                                          ?.liquidTx
-                                                          ?.unblindedUrl ??
-                                                      'tx/${swapTx.txId}',
-                                                  network: linkedSwap!.network,
-                                                  isBTC: swapTx.chain == Chain.bitcoin,
-                                                );
-                                                return ElevatedButton(
-                                                  onPressed: () => launchUrl(url),
-                                                  onLongPress: () => ClipboardService.setClipBoard(url.toString()),
-                                                  style: ElevatedButton.styleFrom(
-                                                    visualDensity: VisualDensity.standard,
-                                                  ),
-                                                  child: const Text(
-                                                    'See Tx',
-                                                    style: TextStyle(fontSize: 16),
-                                                    textAlign: TextAlign.center,
-                                                  ),
-                                                );
-                                              },
-                                            ),
-                                          );
-                                        }
-                                      }
+                                      final explorerUrl =
+                                          'https://sparkscan.io/tx/${tx.txId}?network=${tx.network.name}';
 
-                                      return Row(
+                                      return Column(
+                                        spacing: 12,
+                                        crossAxisAlignment: CrossAxisAlignment.stretch,
                                         children: [
-                                          Expanded(
-                                            child: ElevatedButton(
+                                          ElevatedButton(
+                                            onPressed: () => launchUrlString(explorerUrl),
+                                            onLongPress: () => ClipboardService.setClipBoard(explorerUrl),
+                                            style: ElevatedButton.styleFrom(visualDensity: VisualDensity.standard),
+                                            child: const Text(
+                                              'See Tx',
+                                              style: TextStyle(fontSize: 16),
+                                              textAlign: TextAlign.center,
+                                            ),
+                                          ),
+
+                                          if (tx.inner.details case PaymentDetails_Lightning(
+                                            :final invoice,
+                                            :final htlcDetails,
+                                          ))
+                                            ElevatedButton(
                                               onPressed: () => launchUrl(
-                                                TransactionService.generateExplorerUrl(
-                                                  explorer,
-                                                  tx.liquidTx!.unblindedUrl,
-                                                  blinded: true,
+                                                Uri(
+                                                  scheme: 'https',
+                                                  host: 'validate-payment.com',
+                                                  queryParameters: {
+                                                    'invoice': invoice,
+                                                    'preimage': htlcDetails.preimage,
+                                                  },
                                                 ),
-                                              ),
-                                              onLongPress: () => ClipboardService.setClipBoard(
-                                                TransactionService.generateExplorerUrl(
-                                                  explorer,
-                                                  tx.liquidTx!.unblindedUrl,
-                                                  blinded: true,
-                                                ).toString(),
                                               ),
                                               style: ElevatedButton.styleFrom(visualDensity: VisualDensity.standard),
                                               child: const Text(
-                                                'See Tx 🙈',
+                                                'Verify',
                                                 style: TextStyle(fontSize: 16),
                                                 textAlign: TextAlign.center,
                                               ),
                                             ),
-                                          ),
-                                          const SizedBox(width: 16),
-                                          Expanded(
-                                            child: ElevatedButton(
-                                              onPressed: () => launchUrl(
-                                                TransactionService.generateExplorerUrl(
-                                                  explorer,
-                                                  tx.liquidTx!.unblindedUrl,
+
+                                          if (AppState.blockExplorers.isNotEmpty) ...[
+                                            if (tx.inner.details is PaymentDetails_Withdraw ||
+                                                tx.inner.details is PaymentDetails_Deposit) ...[
+                                              DropdownButton(
+                                                isExpanded: true,
+                                                borderRadius: BorderRadius.circular(12),
+                                                items: AppState.blockExplorers.entries
+                                                    .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
+                                                    .toList(),
+                                                hint: const Text('Transaction Explorer'),
+                                                underline: Container(),
+                                                value: explorer,
+                                                onChanged: (val) async {
+                                                  if (val != null) {
+                                                    explorer = val;
+                                                    update();
+                                                  }
+                                                },
+                                              ),
+                                            ],
+                                            if (tx.inner.details case PaymentDetails_Withdraw(:final txId))
+                                              ElevatedButton(
+                                                onPressed: () => launchUrl(
+                                                  TransactionService.generateExplorerUrl(
+                                                    explorer,
+                                                    'tx/$txId',
+                                                    isBTC: true,
+                                                  ),
+                                                ),
+                                                onLongPress: () => ClipboardService.setClipBoard(
+                                                  TransactionService.generateExplorerUrl(
+                                                    explorer,
+                                                    'tx/$txId',
+                                                    isBTC: true,
+                                                  ).toString(),
+                                                ),
+                                                style: ElevatedButton.styleFrom(visualDensity: VisualDensity.standard),
+                                                child: const Text(
+                                                  'See Chain Tx',
+                                                  style: TextStyle(fontSize: 16),
+                                                  textAlign: TextAlign.center,
                                                 ),
                                               ),
-                                              onLongPress: () => ClipboardService.setClipBoard(
-                                                TransactionService.generateExplorerUrl(
-                                                  explorer,
-                                                  tx.liquidTx!.unblindedUrl,
-                                                ).toString(),
+                                            if (tx.inner.details case PaymentDetails_Deposit(:final txId, :final vout))
+                                              ElevatedButton(
+                                                onPressed: () => launchUrl(
+                                                  TransactionService.generateExplorerUrl(
+                                                    explorer,
+                                                    'tx/$txId#vout=$vout',
+                                                    isBTC: true,
+                                                  ),
+                                                ),
+                                                onLongPress: () => ClipboardService.setClipBoard(
+                                                  TransactionService.generateExplorerUrl(
+                                                    explorer,
+                                                    'tx/$txId#vout=$vout',
+                                                    isBTC: true,
+                                                  ).toString(),
+                                                ),
+                                                style: ElevatedButton.styleFrom(visualDensity: VisualDensity.standard),
+                                                child: const Text(
+                                                  'See Chain Tx',
+                                                  style: TextStyle(fontSize: 16),
+                                                  textAlign: TextAlign.center,
+                                                ),
                                               ),
-                                              style: ElevatedButton.styleFrom(visualDensity: VisualDensity.standard),
-                                              child: const Text(
-                                                'See Tx 👀',
-                                                style: TextStyle(fontSize: 16),
-                                                textAlign: TextAlign.center,
-                                              ),
-                                            ),
-                                          ),
+                                          ],
                                         ],
                                       );
                                     },
@@ -749,7 +751,7 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> with 
                 constraints: const BoxConstraints(maxWidth: 400),
                 child: isCompleted
                     ? Lottie.asset(AppLottie.success, width: double.infinity)
-                    : widget.submarineSwapId != null
+                    : tx.inner.status == PaymentStatus.pending
                     ? AnimatedBuilder(
                         animation: progressAnimationController,
                         builder: (_, _) {
@@ -824,4 +826,68 @@ class CircleClipper extends CustomClipper<Path> {
 
   @override
   bool shouldReclip(covariant CircleClipper oldClipper) => oldClipper.radius != radius;
+}
+
+class DataTile extends StatefulWidget {
+  const DataTile({required this.title, required this.value, this.isCopyable = false, this.isSecure = false, super.key});
+
+  final String title;
+  final dynamic value;
+  final bool isCopyable;
+  final bool isSecure;
+
+  @override
+  State<DataTile> createState() => DataTileState();
+}
+
+class DataTileState extends State<DataTile> {
+  late bool isVisible = !widget.isSecure;
+
+  @override
+  Widget build(BuildContext context) {
+    final value = widget.value is Uint8List ? (widget.value as Uint8List).toHexString : widget.value;
+    return Column(
+      crossAxisAlignment: .start,
+      children: [
+        Text(
+          widget.title,
+          style: const TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w300),
+        ),
+        if (value is Widget)
+          value
+        else if (value is String)
+          value.isEmpty
+              ? const Text('-')
+              : GestureDetector(
+                  onTap: () {
+                    if (widget.isSecure) {
+                      update(() => isVisible = !isVisible);
+                    }
+                  },
+                  child: Row(
+                    crossAxisAlignment: .start,
+                    spacing: 8,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          isVisible ? value : '*' * 25,
+                          style: const TextStyle(fontSize: 16),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (widget.isCopyable)
+                        IconButton(
+                          onPressed: () => ClipboardService.setClipBoard(value),
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(maxHeight: 24, maxWidth: 24),
+                          icon: const Icon(Icons.copy_rounded),
+                        ),
+                    ],
+                  ),
+                ),
+      ],
+    );
+  }
 }

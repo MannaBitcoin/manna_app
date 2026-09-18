@@ -14,7 +14,6 @@ import 'package:manna/services/wallet_service.dart';
 import 'package:manna/theme.dart';
 import 'package:manna/utils/state_extension.dart';
 import 'package:manna/widgets/bottom sheets/account_bottom_sheet.dart';
-import 'package:manna_core/manna_core.dart';
 
 class WalletManagementScreen extends StatefulWidget {
   const WalletManagementScreen({super.key});
@@ -24,10 +23,8 @@ class WalletManagementScreen extends StatefulWidget {
 }
 
 class _WalletManagementScreenState extends State<WalletManagementScreen> {
-  StreamSubscription? swapSubscription;
   @override
   void initState() {
-    swapSubscription = DB.swaps.box.watch().listen((_) => update());
     GlobalListener.addListener(
       stream: .account,
       listenerName: runtimeType.toString(),
@@ -45,7 +42,6 @@ class _WalletManagementScreenState extends State<WalletManagementScreen> {
 
   @override
   void dispose() {
-    swapSubscription?.cancel();
     GlobalListener.removeListener(stream: .account, listenerName: runtimeType.toString());
     super.dispose();
   }
@@ -59,11 +55,8 @@ class _WalletManagementScreenState extends State<WalletManagementScreen> {
       ...(DB.accounts.values
           .where(
             (acc) =>
-                [
-                  ...DB.fullWallets.values,
-                  ...DB.woWallets.values,
-                ].where((w) => w.accountId == acc.id && w.network == Config.network).isNotEmpty &&
-                (acc.isDisabled || (acc.currentWallet.isCorrupted)),
+                DB.fullWallets.values.where((w) => w.accountId == acc.id && w.network == Config.network).isNotEmpty &&
+                acc.isDisabled,
           )
           .toList()
         ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder))),
@@ -93,7 +86,7 @@ class _WalletManagementScreenState extends State<WalletManagementScreen> {
                     if (acc != null) {
                       final wallet = acc.currentWallet;
                       unawaited(DbService.syncEverything());
-                      await WalletService.liquidInit(xpub: wallet.xpub, waitForSync: true);
+                      await WalletService.initSpark(xpub: wallet.xpub, waitForSync: true);
                       await DbService.setNotificationsStatus(account: acc, status: true);
                       update();
                     }
@@ -227,9 +220,7 @@ class _WalletManagementScreenState extends State<WalletManagementScreen> {
         onTap: () => AppRouter.push(AccountDetailScreen(accountId: acc.id)).then((_) => update()),
         tileColor: acc.isMainAccount ? AppColors.primaryColor.withValues(alpha: 0.1) : null,
         shape: RoundedRectangleBorder(borderRadius: BorderRadiusGeometry.circular(12)),
-        titleTextStyle: TextStyle(
-          color: (acc.isDisabled || wallet.isCorrupted) ? Theme.of(context).disabledColor : null,
-        ),
+        titleTextStyle: TextStyle(color: acc.isDisabled ? Theme.of(context).disabledColor : null),
         title: Text.rich(
           TextSpan(
             children: <InlineSpan>[
@@ -243,9 +234,7 @@ class _WalletManagementScreenState extends State<WalletManagementScreen> {
           ),
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
-        leading: wallet.type == WalletType.watchOnly
-            ? const Icon(Icons.remove_red_eye_outlined)
-            : const Icon(Icons.vpn_key_outlined),
+        leading: const Icon(Icons.vpn_key_outlined),
       ),
     );
   }

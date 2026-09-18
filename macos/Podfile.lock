@@ -1,4 +1,6 @@
 PODS:
+  - breez_sdk_spark_flutter (0.25.0):
+    - FlutterMacOS
   - flutter_inappwebview_macos (0.0.1):
     - FlutterMacOS
     - OrderedSet (~> 6.0.3)
@@ -6,6 +8,7 @@ PODS:
   - OrderedSet (6.0.3)
 
 DEPENDENCIES:
+  - breez_sdk_spark_flutter (from `Flutter/ephemeral/.symlinks/plugins/breez_sdk_spark_flutter/macos`)
   - flutter_inappwebview_macos (from `Flutter/ephemeral/.symlinks/plugins/flutter_inappwebview_macos/macos`)
   - FlutterMacOS (from `Flutter/ephemeral`)
 
@@ -14,12 +17,15 @@ SPEC REPOS:
     - OrderedSet
 
 EXTERNAL SOURCES:
+  breez_sdk_spark_flutter:
+    :path: Flutter/ephemeral/.symlinks/plugins/breez_sdk_spark_flutter/macos
   flutter_inappwebview_macos:
     :path: Flutter/ephemeral/.symlinks/plugins/flutter_inappwebview_macos/macos
   FlutterMacOS:
     :path: Flutter/ephemeral
 
 SPEC CHECKSUMS:
+  breez_sdk_spark_flutter: 0b0005cfec94ea3aa2f75dc1cfa8737d2641a221
   flutter_inappwebview_macos: c2d68649f9f8f1831bfcd98d73fd6256366d9d1d
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
   OrderedSet: e539b66b644ff081c73a262d24ad552a69be3a94

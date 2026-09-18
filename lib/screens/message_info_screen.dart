@@ -46,20 +46,6 @@ class _MessageInfoScreenState extends State<MessageInfoScreen> {
           spacing: 8,
           children: [
             MessageBubble(message: message),
-            if (message.messageData is PayReqMessageData) ...[
-              const Divider(),
-              Row(
-                spacing: 4,
-                children: [
-                  const Text('Address', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  Expanded(
-                    child: SelectionArea(
-                      child: Text((message.messageData as PayReqMessageData).address, textAlign: TextAlign.right),
-                    ),
-                  ),
-                ],
-              ),
-            ],
             const Divider(),
             Row(
               spacing: 4,

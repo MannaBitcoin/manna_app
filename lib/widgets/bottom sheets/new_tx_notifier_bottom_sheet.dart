@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart' show PaymentType;
 import 'package:flutter/material.dart';
 import 'package:manna/config.dart';
 import 'package:manna/globals.dart';
@@ -12,7 +13,6 @@ import 'package:manna/services/db_service.dart';
 import 'package:manna/services/nostr_service.dart';
 import 'package:manna/services/wallet_service.dart';
 import 'package:manna/theme.dart';
-import 'package:manna/utils/date_extension.dart';
 import 'package:manna/utils/extensions.dart';
 import 'package:manna/utils/state_extension.dart';
 import 'package:manna/widgets/amount_text.dart';
@@ -30,17 +30,15 @@ class NewReceivedTxBottomSheet extends StatefulWidget {
 
 class _NewReceivedTxBottomSheetState extends State<NewReceivedTxBottomSheet> {
   late final txs = widget.txIds.map((e) => DB.allTransactions[e]).nonNulls.toList()
-    ..sort((a, b) => b.txTimestamp.compareTo(a.txTimestamp));
+    ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
   late List<Contact?> contacts = List.generate(txs.length, (index) => null);
   final carouselController = CarouselController();
-  StreamSubscription? swapSubscription;
   StreamSubscription? transactionSubscription;
 
   @override
   void initState() {
     if (txs.isEmpty) AppRouter.pop();
     transactionSubscription = DB.transactionBox.watch().listen((_) => update());
-    swapSubscription = DB.swaps.box.watch().listen((_) => update());
 
     carouselController.addListener(update);
 
@@ -49,7 +47,7 @@ class _NewReceivedTxBottomSheetState extends State<NewReceivedTxBottomSheet> {
         final wallets = DB.allWallets.where((w) => w.uuid == tx.walletId);
         for (final wallet in wallets) {
           if (contacts[i] == null && (tx.senderUUID != null || tx.receiverUserNameOrUUID != null)) {
-            if (tx.isIncoming) {
+            if (tx.inner.paymentType == PaymentType.receive) {
               if (tx.senderUUID != null) {
                 contacts[i] =
                     DB.contacts[IdWithWalletAndType.wallet(id: tx.senderUUID!, wallet: wallet)] ??
@@ -90,7 +88,6 @@ class _NewReceivedTxBottomSheetState extends State<NewReceivedTxBottomSheet> {
 
   @override
   void dispose() {
-    swapSubscription?.cancel();
     transactionSubscription?.cancel();
 
     carouselController.removeListener(update);
@@ -193,14 +190,14 @@ class _NewReceivedTxBottomSheetState extends State<NewReceivedTxBottomSheet> {
                                     ],
                                   ),
                                   AmountText(
-                                    amountSat: tx.amount,
+                                    amountSat: tx.inner.amount.i,
                                     btcStyle: const TextStyle(
                                       fontSize: 36,
                                       fontWeight: FontWeight.w700,
                                       color: AppColors.primaryColor,
                                     ),
                                     showFiat: true,
-                                    atTime: tx.txTimestamp,
+                                    atTime: tx.timestamp,
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
@@ -233,13 +230,6 @@ class _NewReceivedTxBottomSheetState extends State<NewReceivedTxBottomSheet> {
                                             color: context.themedColor(bright: Colors.black54, dark: Colors.white54),
                                           ),
                                         ),
-                                      ),
-                                    ),
-                                  if (tx.confirmationTimestamp != null)
-                                    Text(
-                                      tx.confirmationTimestamp!.format(),
-                                      style: TextStyle(
-                                        color: context.themedColor(bright: Colors.black54, dark: Colors.white54),
                                       ),
                                     ),
                                 ],

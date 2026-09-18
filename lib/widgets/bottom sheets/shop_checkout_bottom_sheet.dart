@@ -13,7 +13,6 @@ import 'package:manna/services/clipboard_service.dart';
 import 'package:manna/services/db.dart';
 import 'package:manna/services/transaction_service.dart';
 import 'package:manna/theme.dart';
-import 'package:manna/utils/de_bouncer.dart';
 import 'package:manna/utils/parser.dart';
 import 'package:manna/utils/sats_extension.dart';
 import 'package:manna/utils/state_extension.dart';
@@ -59,14 +58,11 @@ class _ShopCheckoutBottomSheetState extends State<ShopCheckoutBottomSheet> {
 
   // payment
   String? qrData;
-  TraType traType = TraType.lnToLbtc;
+  TraType traType = TraType.lnToSpark;
   final taxExpansionController = ExpansibleController();
   final feeExpansionController = ExpansibleController();
   bool isTaxExpanded = false;
   bool isBreakdownExpanded = false;
-  FeesAndAmounts? calculations;
-  bool isBuildingFees = false;
-  final deBouncer = DeBouncer(const Duration(milliseconds: 200));
 
   int get totalTax => taxMap.entries.fold(0.0, (p, e) => p + e.value).fiatToSats();
   int get totalAmount => widget.amount + tipAmount;
@@ -97,13 +93,12 @@ class _ShopCheckoutBottomSheetState extends State<ShopCheckoutBottomSheet> {
   }
 
   Future<void> refreshQr() async {
-    await rebuildFees();
+    startLoader();
     qrData = await TransactionService.generateQrData(
       account: selectedAccount,
       amount: totalAmount,
       memo: memo,
       type: traType,
-      doesSenderPayFee: AppState.payerPayShopFee,
     );
     stopLoader();
     update();
@@ -114,8 +109,7 @@ class _ShopCheckoutBottomSheetState extends State<ShopCheckoutBottomSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final isFeasible = (calculations?.receiveAmount ?? 0) > 0;
-    if (isTipped && (!isFeasible)) {
+    if (isTipped) {
       try {
         postFrameCallBack(() => feeExpansionController.collapse());
       } catch (_) {}
@@ -124,20 +118,9 @@ class _ShopCheckoutBottomSheetState extends State<ShopCheckoutBottomSheet> {
       padding: const EdgeInsets.symmetric(horizontal: 16) + context.keyboardPadding,
       child: Column(
         mainAxisSize: MainAxisSize.min,
-        children: [...(!isTipped ? tipView() : paymentView(isFeasible)), const SizedBox(height: 16)],
+        children: [...(!isTipped ? tipView() : paymentView()), const SizedBox(height: 16)],
       ),
     );
-  }
-
-  Future<void> rebuildFees() async {
-    update(() => isBuildingFees = true);
-    calculations = await calculateFeeAndAmounts(
-      wallet: selectedWallet,
-      type: traType,
-      amount: totalAmount,
-      isAmountTarget: AppState.payerPayShopFee,
-    );
-    update(() => isBuildingFees = false);
   }
 
   List<Widget> tipView() {
@@ -254,7 +237,7 @@ class _ShopCheckoutBottomSheetState extends State<ShopCheckoutBottomSheet> {
     ];
   }
 
-  List<Widget> paymentView(bool isPaymentFeasible) {
+  List<Widget> paymentView() {
     return [
       DropdownButton2(
         iconStyleData: const IconStyleData(iconSize: 35),
@@ -268,12 +251,11 @@ class _ShopCheckoutBottomSheetState extends State<ShopCheckoutBottomSheet> {
           decoration: BoxDecoration(borderRadius: BorderRadius.circular(10)),
         ),
         items: const [
-          DropdownMenuItem(value: TraType.lnToLbtc, child: Text('Lightning')),
-          DropdownMenuItem(value: TraType.lbtcToLbtcReceive, child: Text('Liquid')),
-          DropdownMenuItem(value: TraType.btcToLbtc, child: Text('BTC')),
+          DropdownMenuItem(value: TraType.lnToSpark, child: Text('Lightning')),
+          DropdownMenuItem(value: TraType.btcToSpark, child: Text('BTC')),
         ],
         onChanged: (value) async {
-          traType = value ?? TraType.lnToLbtc;
+          traType = value ?? TraType.lnToSpark;
           await refreshQr();
         },
         value: traType,
@@ -330,11 +312,10 @@ class _ShopCheckoutBottomSheetState extends State<ShopCheckoutBottomSheet> {
             maintainState: true,
             title: isBreakdownExpanded
                 ? const Text('Fee Details', style: TextStyle(fontSize: 16))
-                : FeesTile(amountSat: isPaymentFeasible ? calculations!.receiveAmount : 0, title: 'Total'),
+                : FeesTile(amountSat: totalAmount, title: 'Total'),
             minTileHeight: 0,
             shape: const Border(),
             tilePadding: EdgeInsets.only(top: 8, bottom: !isBreakdownExpanded ? 8 : 0),
-            enabled: isPaymentFeasible,
             onExpansionChanged: (value) => update(() => isBreakdownExpanded = value),
             children: [
               InkWell(
@@ -345,17 +326,8 @@ class _ShopCheckoutBottomSheetState extends State<ShopCheckoutBottomSheet> {
                     if (totalTax > 0) FeesTile(amountSat: totalTax, title: 'Taxes'),
                     if (tipAmount > 0) FeesTile(amountSat: tipAmount, title: 'Tip'),
 
-                    if (calculations != null) ...[
-                      if (calculations!.mannaFee > 0) FeesTile(amountSat: calculations!.mannaFee, title: 'Manna fee'),
-                      if (calculations!.boltzFee > 0) FeesTile(amountSat: calculations!.boltzFee, title: 'Boltz fee'),
-                      if (calculations!.boltzNetworkFee > 0)
-                        FeesTile(amountSat: calculations!.boltzNetworkFee, title: 'Boltz network fee'),
-                      if (calculations!.liquidNetworkFee > 0)
-                        FeesTile(amountSat: calculations!.liquidNetworkFee, title: 'Network fee'),
-                    ],
-
                     const Divider(),
-                    FeesTile(amountSat: isPaymentFeasible ? calculations!.receiveAmount : 0, title: 'Total'),
+                    FeesTile(amountSat: totalAmount, title: 'Total'),
                   ],
                 ),
               ),

@@ -2,18 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:manna/app_state.dart';
 import 'package:manna/config.dart';
 import 'package:manna/globals.dart';
 import 'package:manna/models/account.dart';
-import 'package:manna/models/swap.dart';
 import 'package:manna/models/wallet.dart';
 import 'package:manna/router.dart';
-import 'package:manna/screens/all_swap_screen.dart';
 import 'package:manna/screens/image_preview_screen.dart';
+import 'package:manna/screens/liquid_wallet_screen.dart';
 import 'package:manna/screens/seed_phrase_screen.dart';
-import 'package:manna/services/biometric_services.dart';
-import 'package:manna/services/clipboard_service.dart';
 import 'package:manna/services/db.dart';
 import 'package:manna/services/db_service.dart';
 import 'package:manna/services/log_service.dart';
@@ -23,13 +19,10 @@ import 'package:manna/utils/constants.dart';
 import 'package:manna/utils/extensions.dart';
 import 'package:manna/utils/state_extension.dart';
 import 'package:manna/utils/toast_service.dart';
-import 'package:manna/utils/util.dart';
 import 'package:manna/widgets/amount_text.dart';
 import 'package:manna/widgets/bottom sheets/edit_profile_bottom_sheet.dart';
 import 'package:manna/widgets/bottom%20sheets/account_bottom_sheet.dart';
-import 'package:manna/widgets/swap_data_card.dart';
-import 'package:manna_core/manna_core.dart' show Swap, WalletType, Descriptor;
-import 'package:pretty_qr_code/pretty_qr_code.dart';
+import 'package:manna_core/manna_core.dart' show WalletType;
 
 class AccountDetailScreen extends StatefulWidget {
   const AccountDetailScreen({required this.accountId, super.key});
@@ -47,7 +40,6 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
 
   late final userNameController = TextEditingController(text: wallet.metaData?.userName);
   late final bolt11DescController = StyleableTextFieldController(text: wallet.metaData?.bolt11ShortDesc);
-  List<Swap> swaps = [];
   bool isFetchingRandomUserName = false, isSavingUserName = false, isSavingBolt11Desc = false;
 
   @override
@@ -66,8 +58,6 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
         return false;
       },
     );
-    swaps = DB.swaps.values.where((s) => s.walletId == wallet.uuid && s.walletType == wallet.type).toList()
-      ..sort((e1, e2) => e2.creationTimeUTC.compareTo(e1.creationTimeUTC));
     super.initState();
   }
 
@@ -96,9 +86,6 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
   Widget build(BuildContext context) {
     final shouldSaveUserName = userNameController.text.trim().toLowerCase() != wallet.metaData?.userName;
     final shouldSaveBolt11Desc = bolt11DescController.text.trim() != wallet.metaData?.bolt11ShortDesc;
-
-    final trustMinimizedLNURLAccounts = AppState.trustMinimizedLNURLAccounts;
-    final trustMinimizedBolt12Accounts = AppState.trustMinimizedBolt12Accounts;
 
     return Scaffold(
       appBar: AppBar(
@@ -196,8 +183,6 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 4),
-                        if (wallet.type == WalletType.watchOnly) const Text('Type : Watch-only'),
                       ],
                     ),
                     Align(
@@ -214,12 +199,6 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                           DB.transactions.values.where((t) => t.walletId == wallet.uuid).length.toString(),
                           style: const TextStyle(fontSize: 18),
                         ),
-                      ],
-                    ),
-                    Row(
-                      children: [
-                        const Expanded(child: Text('Total Swaps: ')),
-                        Text(swaps.length.toString(), style: const TextStyle(fontSize: 16)),
                       ],
                     ),
                   ],
@@ -284,6 +263,17 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
               buildCounter: (context, {required currentLength, required isFocused, required maxLength}) => null,
               onChanged: (value) => update(),
             ),
+
+            Card(
+              margin: EdgeInsets.zero,
+              child: ListTile(
+                title: const Text('Old liquid wallet'),
+                leading: const Icon(Icons.wallet),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => AppRouter.push(LiquidWalletScreen(wallet: wallet)),
+              ),
+            ),
+
             // seed phrase
             if (wallet.type == WalletType.full)
               Card(
@@ -313,7 +303,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                           if (isDisabled) {
                             await acc.update(isDisabled: false);
                             unawaited(DbService.syncEverything());
-                            await WalletService.liquidInit(xpub: wallet.xpub, waitForSync: true);
+                            await WalletService.initSpark(xpub: wallet.xpub, waitForSync: true);
                             await DbService.setNotificationsStatus(account: acc, status: true);
                           } else {
                             await DbService.setNotificationsStatus(account: acc, status: false);
@@ -333,64 +323,6 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                   );
                 },
               ),
-            // wallet descriptor
-            Card(
-              margin: EdgeInsets.zero,
-              child: ListTile(
-                title: const Text('Wallet descriptor (xpub)'),
-                leading: const Icon(Icons.key),
-                onTap: () async {
-                  if (!(await BiometricService.authenticateBiometricsIfExists(
-                    message: 'Please authenticate to copy descriptor!',
-                  ))) {
-                    return;
-                  }
-                  final descriptor = await Descriptor.greenWalletWatchOnly(descriptor: wallet.descriptor);
-
-                  if (context.mounted) {
-                    unawaited(
-                      showDialog(
-                        context: context,
-                        builder: (context) => AlertDialog(
-                          title: FittedBox(child: Text('Wallet descriptor (${account.name})')),
-                          content: GestureDetector(
-                            onTap: () => ClipboardService.setClipBoard(descriptor, 'xpub copied'),
-                            child: Column(
-                              spacing: 8,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  height: (context.screenWidth - 128).clamp(0, 500),
-                                  width: (context.screenWidth - 128).clamp(0, 500),
-                                  decoration: BoxDecoration(
-                                    border: Border.all(color: Colors.grey.shade400),
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                  alignment: Alignment.center,
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadiusGeometry.circular(16),
-                                    child: PrettyQrView.data(data: descriptor, decoration: qrDecoration(descriptor)),
-                                  ),
-                                ),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: OutlinedButton.icon(
-                                    onPressed: () => ClipboardService.setClipBoard(descriptor, 'xpub copied'),
-                                    label: const Text('copy'),
-                                    icon: const Icon(Icons.copy),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  }
-                },
-              ),
-            ),
-            // advance
             Card(
               margin: EdgeInsets.zero,
               child: ExpansionTile(
@@ -474,57 +406,6 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                       ),
                       const SizedBox(height: 8),
                       SwitchListTile(
-                        title: const Text('Minimize trust-LNURL'),
-                        subtitle: const Text(
-                          "When enabled, LNURL swaps will be signed by the phone only, minimising trust on Manna's server.\nReduces reliability of LNURL when phone is offline.",
-                        ),
-                        contentPadding: const EdgeInsets.only(left: 8),
-                        value: trustMinimizedLNURLAccounts.contains(widget.accountId),
-                        onChanged: (value) async {
-                          value
-                              ? trustMinimizedLNURLAccounts.add(widget.accountId)
-                              : trustMinimizedLNURLAccounts.remove(widget.accountId);
-                          startLoader();
-                          try {
-                            final res = await DbService.upsertWallets(
-                              Map.fromEntries(wallets.map((e) => MapEntry(e, {'use_trusted_lnurl': !value}))),
-                            );
-                            if (res) {
-                              AppState.trustMinimizedLNURLAccounts = trustMinimizedLNURLAccounts.toList();
-                              updateData();
-                            }
-                          } catch (e, s) {
-                            logE(e, stackTrace: s);
-                          } finally {
-                            stopLoader();
-                          }
-                        },
-                      ),
-                      SwitchListTile(
-                        title: const Text('Minimize trust-BOLT12'),
-                        subtitle: const Text(
-                          "When enabled, BOLT12 swaps will be signed by the phone only, minimising trust on Manna's server.\n(Not recommended)",
-                        ),
-                        contentPadding: const EdgeInsets.only(left: 8),
-                        value: trustMinimizedBolt12Accounts.contains(widget.accountId),
-                        onChanged: (value) async {
-                          value
-                              ? trustMinimizedBolt12Accounts.add(widget.accountId)
-                              : trustMinimizedBolt12Accounts.remove(widget.accountId);
-                          try {
-                            startLoader();
-                            AppState.trustMinimizedBolt12Accounts = trustMinimizedBolt12Accounts.toList();
-                            await DbService.upsertBolt12Offers(DB.bolt12Offers.values.toList());
-                            updateData();
-                          } catch (e, s) {
-                            logE(e, stackTrace: s);
-                          } finally {
-                            stopLoader();
-                          }
-                          update();
-                        },
-                      ),
-                      SwitchListTile(
                         title: const Text('Anonymous transactions'),
                         subtitle: const Text(
                           "Receiver will not get notification, notes won't be stored in Manna's database",
@@ -532,24 +413,10 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                         contentPadding: const EdgeInsets.only(left: 8),
                         value: account.isSendAnonymously,
                         onChanged: (value) async {
-                          await account.update(
-                            isSendAnonymously: value,
-                            isSendNotification: value ? false : account.isSendNotification,
-                          );
+                          await account.update(isSendAnonymously: value);
                           update();
                         },
                       ),
-                      if (!account.isSendAnonymously)
-                        SwitchListTile(
-                          title: const Text('Send notifications'),
-                          subtitle: const Text('Receiver will get notification about the payment on Manna.'),
-                          contentPadding: const EdgeInsets.only(left: 8),
-                          value: account.isSendNotification,
-                          onChanged: (value) async {
-                            await account.update(isSendNotification: value);
-                            update();
-                          },
-                        ),
                     ],
                   ),
                 ],
@@ -585,36 +452,6 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                 },
               ),
             ),
-            Row(
-              children: [
-                const Expanded(
-                  child: Text('Swap History', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                ),
-                TextButton(
-                  onPressed: () => AppRouter.push(AllSwapScreen(wallet: wallet)),
-                  child: const Text('View All'),
-                ),
-              ],
-            ),
-            const Divider(height: 0),
-            swaps.isEmpty
-                ? const Center(child: Text('No swaps found!'))
-                : Column(
-                    children: [
-                      for (final swap in swaps.take(25)) SwapDataCard(swap.id),
-                      if (swaps.length > 25)
-                        Padding(
-                          padding: const EdgeInsets.all(8),
-                          child: SizedBox(
-                            width: double.infinity,
-                            child: TextButton(
-                              onPressed: () => AppRouter.push(AllSwapScreen(wallet: wallet)),
-                              child: const Text('View All'),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
           ],
         ),
       ),

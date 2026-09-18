@@ -12,16 +12,13 @@ import 'package:manna/utils/constants.dart';
 import 'package:manna/utils/de_bouncer.dart';
 import 'package:manna/utils/extensions.dart';
 import 'package:manna/utils/parser.dart';
-import 'package:manna/utils/sats_extension.dart';
 import 'package:manna/utils/state_extension.dart';
 import 'package:manna/utils/toast_service.dart';
 import 'package:manna/utils/util.dart';
 import 'package:manna/widgets/amount_text.dart';
-import 'package:manna/widgets/fees_tile.dart';
 
 class LNURLWithdrawDialog extends StatefulWidget {
   const LNURLWithdrawDialog({
-    required this.serviceName,
     required this.callback,
     required this.k1,
     required this.minWithdrawable,
@@ -30,7 +27,6 @@ class LNURLWithdrawDialog extends StatefulWidget {
     super.key,
   });
 
-  final String serviceName;
   final String callback;
   final String k1;
   final int minWithdrawable;
@@ -47,8 +43,6 @@ class _LNURLWithdrawDialogState extends State<LNURLWithdrawDialog> {
   final _formKey = GlobalKey<FormState>();
 
   int amount = 0;
-  final feeExpansionController = ExpansibleController();
-  FeesAndAmounts? calculations;
   final deBouncer = DeBouncer(const Duration(milliseconds: 200));
 
   @override
@@ -56,7 +50,6 @@ class _LNURLWithdrawDialogState extends State<LNURLWithdrawDialog> {
     amount = widget.maxWithdrawable;
     satAmountController.text = amount.toStringAsFixed(0);
     memoController.text = widget.desc?.trim() ?? '';
-    rebuildFees();
     super.initState();
   }
 
@@ -69,11 +62,6 @@ class _LNURLWithdrawDialogState extends State<LNURLWithdrawDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final isPaymentFeasible = (calculations?.receiveAmount ?? 0) > 0;
-    if (!isPaymentFeasible) {
-      postFrameCallBack(() => feeExpansionController.collapse());
-    }
-
     return AlertDialog(
       title: const Text('LNURL-Withdraw'),
       content: Form(
@@ -99,7 +87,7 @@ class _LNURLWithdrawDialogState extends State<LNURLWithdrawDialog> {
                 ),
                 onChanged: (value) async {
                   amount = int.tryParse(value) ?? 0;
-                  deBouncer.call(() => rebuildFees());
+                  update();
                 },
                 maxLength: widget.maxWithdrawable.toStringAsFixed(0).length,
                 inputFormatters: [
@@ -164,48 +152,6 @@ class _LNURLWithdrawDialogState extends State<LNURLWithdrawDialog> {
                   ),
                 ],
               ),
-              ListTileTheme(
-                minVerticalPadding: 0,
-                child: ExpansionTile(
-                  controller: feeExpansionController,
-                  title: feeExpansionController.isExpanded
-                      ? const Text('Fee Details', style: TextStyle(fontSize: 16))
-                      : FeesTile(
-                          amountSat: !isPaymentFeasible ? 0 : calculations!.receiveAmount,
-                          title: 'You will receive',
-                        ),
-                  minTileHeight: 0,
-                  shape: const Border(),
-                  tilePadding: EdgeInsets.only(top: 8, bottom: !feeExpansionController.isExpanded ? 8 : 0),
-                  enabled: isPaymentFeasible,
-                  onExpansionChanged: (value) => update(),
-                  children: [
-                    InkWell(
-                      onTap: () => feeExpansionController.collapse(),
-                      child: Column(
-                        children: [
-                          if (calculations != null) ...[
-                            FeesTile(amountSat: calculations!.receiveAmount, title: 'Amount'),
-                            if (calculations!.mannaFee > 0)
-                              FeesTile(amountSat: calculations!.mannaFee, title: 'Manna fee'),
-                            if (calculations!.boltzFee > 0)
-                              FeesTile(amountSat: calculations!.boltzFee, title: 'Boltz fee'),
-                            if (calculations!.boltzNetworkFee > 0)
-                              FeesTile(amountSat: calculations!.boltzNetworkFee, title: 'Boltz network fee'),
-                            if (calculations!.liquidNetworkFee > 0)
-                              FeesTile(amountSat: calculations!.liquidNetworkFee, title: 'Network fee'),
-                          ],
-                          const Divider(),
-                          FeesTile(
-                            amountSat: !isPaymentFeasible ? 0 : calculations!.receiveAmount,
-                            title: 'You will receive',
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
             ],
           ),
         ),
@@ -222,17 +168,16 @@ class _LNURLWithdrawDialogState extends State<LNURLWithdrawDialog> {
                       final invoice = await TransactionService.generateQrData(
                         account: selectedAcc!,
                         amount: amount,
-                        type: TraType.lnToLbtc,
+                        type: TraType.lnToSpark,
                         memo: memoController.text.trim(),
                         asBIP21: false,
-                        doesSenderPayFee: false,
                       );
                       if (invoice?.isNotEmpty ?? false) {
                         final res = await globalDio.getUri(
                           Uri.parse(widget.callback).replace(queryParameters: {'k1': widget.k1, 'pr': invoice}),
                         );
                         if (res.isSuccess && parseString(res.data['status']).toLowerCase() == 'ok') {
-                          ToastService.show('Withdrawal request sent to ${widget.serviceName}!');
+                          ToastService.show('Withdrawal request sent!');
                           AppRouter.pop(true);
                         } else {
                           final error = parseStringN(res.data['reason']);
@@ -252,16 +197,5 @@ class _LNURLWithdrawDialogState extends State<LNURLWithdrawDialog> {
         ),
       ],
     );
-  }
-
-  Future<void> rebuildFees() async {
-    if (selectedAcc == null) return;
-    calculations = await calculateFeeAndAmounts(
-      wallet: selectedAcc!.currentWallet,
-      type: TraType.lnToLbtc,
-      amount: amount,
-      isAmountTarget: false,
-    );
-    update();
   }
 }

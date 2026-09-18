@@ -3,7 +3,6 @@ import 'dart:convert';
 
 import 'package:build_info/build_info.dart';
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -56,7 +55,6 @@ Future<void> updateNetwork(Network network) async {
   } finally {
     stopLoader();
     GlobalListener.update(stream: .account);
-    GlobalListener.update(stream: .receivingTx);
   }
 }
 
@@ -308,33 +306,6 @@ class MenuScreenState extends State<MenuScreen> {
                           onChanged: (bool value) => update(() => AppState.isSoundEffectsOn = value),
                         ),
                       ),
-                      if (Config.apiConfig.regtest.supabase.projectRef.isNotEmpty)
-                        Card(
-                          child: SwitchListTile(
-                            title: const Text('Switch to MannaNet'),
-                            subtitle: Text.rich(
-                              TextSpan(
-                                text:
-                                    'Mannanet is a Regtest network on the Manna server for testing and education only. Bitcoin here have no value. visit ',
-                                children: [
-                                  TextSpan(
-                                    text: 'https://wallets.${Config.apiConfig.regtest.serverUrl}',
-                                    style: TextStyle(color: Colors.blue.shade600),
-                                    recognizer: TapGestureRecognizer()
-                                      ..onTap = () =>
-                                          launchUrlString('https://wallets.${Config.apiConfig.regtest.serverUrl}'),
-                                  ),
-                                  const TextSpan(text: ' to test.'),
-                                ],
-                              ),
-                            ),
-                            value: Config.network == Network.regtest,
-                            secondary: const Icon(Icons.change_circle_outlined),
-                            onChanged: (value) async {
-                              await updateNetwork(value ? Network.regtest : Network.mainnet);
-                            },
-                          ),
-                        ),
                       Card(
                         child: ListTile(
                           leading: const Icon(Icons.bug_report),

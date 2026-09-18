@@ -13,7 +13,7 @@ pub(super) fn decrypt_file(file_path: &String, key: [u8; 32]) -> Result<Value, N
 
     let nonce = Nonce::from_slice(&encrypted_data[0..12]);
     let ciphertext_with_tag = &encrypted_data[12..];
-
+    
     let cipher = Aes256Gcm::new(&key.into());
     let plaintext = cipher
         .decrypt(nonce, ciphertext_with_tag)

@@ -4,6 +4,7 @@ import 'dart:developer';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
+import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart';
 import 'package:dio/dio.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart';
@@ -31,15 +32,7 @@ void logD(dynamic d) => logger?.d(
   stackTrace: StackTrace.fromString(StackTrace.current.toString().trim().split('\n').sublist(1).join('\n')),
 );
 
-void logE(
-  dynamic d, {
-  StackTrace? stackTrace,
-  dynamic data,
-  String? title,
-  String? solution,
-  bool? showToast,
-  bool includeErrorInToast = true,
-}) {
+void logE(dynamic d, {StackTrace? stackTrace, dynamic data, String? title, String? solution, bool showToast = false}) {
   if (d == null) return;
   dynamic e = d;
 
@@ -49,8 +42,26 @@ void logE(
   if (d is LwkError) {
     e = d.msg;
   }
-  if (d is BoltzError) {
-    e = '${d.kind} - ${d.message}';
+  if (d is SdkError) {
+    e = switch (d) {
+      SdkError_SparkError(:final field0) => field0,
+      SdkError_InsufficientFunds() => 'You do not have enough balance',
+      SdkError_InvalidUuid(:final field0) => field0,
+      SdkError_InvalidInput(:final field0) => field0,
+      SdkError_NetworkError(:final field0) => field0,
+      SdkError_StorageError(:final field0) => field0,
+      SdkError_ChainServiceError(:final field0) => field0,
+      SdkError_MaxDepositClaimFeeExceeded() => 'Maximum deposit claim fee exceeded',
+      SdkError_MissingUtxo() => 'UTXO not found',
+      SdkError_DepositClaimInProgress() => 'Deposit claim is already in progress',
+      SdkError_RefundReplacementFeeTooLow() => 'Fee for refund tx is too low',
+      SdkError_LnurlError(:final field0) => field0,
+      SdkError_Signer(:final field0) => field0,
+      SdkError_OptimizationAlreadyRunning() => 'Leaf optimisation is already in progress',
+      SdkError_OptimizationCancelled() => 'Leaf optimisation cancelled',
+      SdkError_InsufficientCpfpFunds() => 'Insufficient CPFP funds',
+      SdkError_Generic(:final field0) => field0,
+    };
   }
   if (d is DioException) {
     e = '${d.message} - ${d.error} - ${d.response?.statusCode} ${d.response?.statusMessage} - ${d.response?.data}';
@@ -60,15 +71,10 @@ void logE(
 
   logger?.e(data ?? e, error: e, stackTrace: trace);
 
-  if ((showToast ?? true) && ((title?.isNotEmpty ?? false) || (solution?.isNotEmpty ?? false))) {
-    final toastMessage = '${title ?? ''}${includeErrorInToast ? '\n$e' : ''}${solution != null ? '\n$solution' : ''}';
-    if (e is String && e.contains('swap creation is disabled')) {
-      ToastService.show(
-        'Boltz swaps to Lightning and L1 are currently disabled. You can receive/send to a Liquid address. We apologize for the inconvenience.',
-      );
-    } else {
-      ToastService.show(toastMessage);
-    }
+  if ((title?.isNotEmpty ?? false) || (solution?.isNotEmpty ?? false)) {
+    ToastService.show('${title ?? ''}${solution != null ? '\n$solution' : ''}');
+  } else if (showToast) {
+    ToastService.show('$e');
   }
 
   if (!kDebugMode) {
@@ -218,9 +224,10 @@ class CompactPrinter extends LogPrinter {
 class FileLogOutput extends LogOutput {
   FileLogOutput({
     required String dirPath,
+    String fileName = 'flutter.jsonl',
     this._bufferDuration = const Duration(seconds: 2),
     this._maxBufferSize = 2000,
-  }) : _file = File(path.join(dirPath, 'flutter.jsonl'));
+  }) : _file = File(path.join(dirPath, fileName));
 
   final Duration _bufferDuration;
   final int _maxBufferSize;

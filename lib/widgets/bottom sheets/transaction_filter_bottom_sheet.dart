@@ -29,7 +29,7 @@ class _TransactionFilterBottomSheetState extends State<TransactionFilterBottomSh
     final amounts = DB.transactions.values
         .where((t) => t.walletId == wallet?.uuid)
         .toList()
-        .map((e) => e.amount.abs().toDouble());
+        .map((e) => e.inner.amount.abs().toDouble());
     minAmount = amounts.fold(0, math.min);
     maxAmount = amounts.fold(0, math.max);
     super.initState();
@@ -63,7 +63,7 @@ class _TransactionFilterBottomSheetState extends State<TransactionFilterBottomSh
                 ),
                 IconButton(
                   onPressed: () => update(
-                    () => filterData = (type: 3, direction: 3, amountRange: null, pickedRange: null, categories: {}),
+                    () => filterData = (type: 7, direction: 3, amountRange: null, pickedRange: null, categories: {}),
                   ),
                   icon: const Icon(Icons.restart_alt),
                   tooltip: 'Reset filters',
@@ -102,6 +102,15 @@ class _TransactionFilterBottomSheetState extends State<TransactionFilterBottomSh
                   context: context,
                   firstDate: DateTime(2000),
                   lastDate: DateTime.now(),
+                  routeSettings: const RouteSettings(name: 'TransactionFilterBottomSheet'),
+                  builder: (context, child) {
+                    return Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 500.0, maxHeight: 600.0),
+                        child: child,
+                      ),
+                    );
+                  },
                 );
                 update(() => filterData = filterData.copyWith(pickedRange: pickedRange));
               },
@@ -131,30 +140,31 @@ class _TransactionFilterBottomSheetState extends State<TransactionFilterBottomSh
                 '${filterData.amountRange?.start.toStringAsFixed(0) ?? minAmount} - ${filterData.amountRange?.end.toStringAsFixed(0) ?? maxAmount}',
               ),
             ),
-            // Row(
-            //   children: [
-            //     Expanded(
-            //       child: CheckboxListTile(
-            //         value: filterData.type % 2 == 1,
-            //         title: const Text('Liquid'),
-            //         onChanged: (value) {
-            //           filterData = filterData.copyWith(type: value! ? filterData.type | 1 : 2);
-            //           update();
-            //         },
-            //       ),
-            //     ),
-            //     Expanded(
-            //       child: CheckboxListTile(
-            //         title: const Text('Lightning'),
-            //         value: filterData.type >= 2,
-            //         onChanged: (value) {
-            //           filterData = filterData.copyWith(type: value! ? (filterData.type == 1 ? 3 : 2) : 1);
-            //           update();
-            //         },
-            //       ),
-            //     ),
-            //   ],
-            // ),
+            Row(
+              children: [
+                Expanded(
+                  child: CheckboxListTile(
+                    title: const Text('Lightning'),
+                    value: filterData.type & 4 == 4,
+                    onChanged: (value) => update(() => filterData = filterData.copyWith(type: filterData.type ^ 4)),
+                  ),
+                ),
+                Expanded(
+                  child: CheckboxListTile(
+                    title: const Text('Bitcoin'),
+                    value: filterData.type & 2 == 2,
+                    onChanged: (value) => update(() => filterData = filterData.copyWith(type: filterData.type ^ 2)),
+                  ),
+                ),
+                Expanded(
+                  child: CheckboxListTile(
+                    title: const Text('Spark'),
+                    value: filterData.type & 1 == 1,
+                    onChanged: (value) => update(() => filterData = filterData.copyWith(type: filterData.type ^ 1)),
+                  ),
+                ),
+              ],
+            ),
             Row(
               children: [
                 Expanded(

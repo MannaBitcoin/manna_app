@@ -50,11 +50,7 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
                 t.receiverUserNameOrUUID == contact.lnurl()),
       ),
     );
-    transactions.sort(
-      (a, b) => a.confirmationTimestamp == b.confirmationTimestamp
-          ? b.timestamp.compareTo(a.timestamp)
-          : b.txTimestamp.compareTo(a.txTimestamp),
-    );
+    transactions.sort((a, b) => b.timestamp.compareTo(a.timestamp));
 
     // update manna contacts
     if (widget.contact.lnurl().isMannaUserName && DB.contacts.containsKey(widget.contact.metaId)) {
@@ -350,7 +346,6 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
                                         ChatScreen(
                                           contact: contact,
                                           messageToDeliver: const PayReqMessageData(
-                                            address: '',
                                             amount: 0,
                                             isSat: true,
                                             memo: '',

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:manna/app_state.dart';
 import 'package:manna/globals.dart';
-import 'package:manna/models/account.dart';
 import 'package:manna/models/chat_message.dart';
 import 'package:manna/router.dart';
 import 'package:manna/services/log_service.dart';
@@ -12,16 +11,16 @@ import 'package:manna/utils/sats_extension.dart';
 import 'package:manna/utils/state_extension.dart';
 import 'package:manna/widgets/amount_text.dart';
 
-class RequestBottomSheet extends StatefulWidget {
-  const RequestBottomSheet({this.initialData, super.key});
+class PaymentRequestBottomSheet extends StatefulWidget {
+  const PaymentRequestBottomSheet({this.initialData, super.key});
 
   final PayReqMessageData? initialData;
 
   @override
-  State<RequestBottomSheet> createState() => _RequestBottomSheetState();
+  State<PaymentRequestBottomSheet> createState() => _PaymentRequestBottomSheetState();
 }
 
-class _RequestBottomSheetState extends State<RequestBottomSheet> {
+class _PaymentRequestBottomSheetState extends State<PaymentRequestBottomSheet> {
   final fiatAmountController = TextEditingController(),
       satAmountController = TextEditingController(),
       noteController = TextEditingController();
@@ -122,19 +121,13 @@ class _RequestBottomSheetState extends State<RequestBottomSheet> {
               onPressed: () async {
                 startLoader();
                 try {
-                  final address = widget.initialData?.address ?? await selectedWallet.getConfidentialAddress();
                   final amount = parseDouble(
                     isSatLastEdited ? satAmountController.text.trim() : fiatAmountController.text.trim(),
                   );
                   final note = noteController.text.trim();
-                  if (address != null && amount > 0) {
+                  if (amount > 0) {
                     AppRouter.pop(
-                      PayReqMessageData(
-                        address: address,
-                        amount: amount,
-                        isSat: isSatLastEdited,
-                        memo: note.isEmpty ? null : note,
-                      ),
+                      PayReqMessageData(amount: amount, isSat: isSatLastEdited, memo: note.isEmpty ? null : note),
                     );
                   }
                 } catch (e, s) {

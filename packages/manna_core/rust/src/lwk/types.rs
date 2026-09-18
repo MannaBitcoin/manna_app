@@ -1,14 +1,14 @@
 use super::error::LwkError;
-use crate::util::Network;
+use crate::types::Network;
 use flutter_rust_bridge::frb;
 use lwk_wollet::{
-    AddressResult, Network as ElementsNetwork, WalletTx, WalletTxOut,
-    bitcoincore_rpc::jsonrpc::serde_json,
-    elements::{
-        Address as LwkAddress, AddressParams, Script,
-        hex::{FromHex, ToHex},
-    },
-    secp256k1,
+    bitcoincore_rpc::jsonrpc::serde_json, elements::{
+        hex::{FromHex, ToHex}, Address as LwkAddress, AddressParams,
+        Script,
+    }, secp256k1, AddressResult,
+    Network as ElementsNetwork,
+    WalletTx,
+    WalletTxOut,
 };
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -263,13 +263,13 @@ impl From<WalletTx> for Tx {
                     value,
                 })
                 .collect(),
-            txid: wallet_tx.tx.txid().to_string().clone(),
+            txid: wallet_tx.tx.txid().to_string(),
             outputs,
             inputs,
-            fee: wallet_tx.fee,
-            timestamp: wallet_tx.timestamp,
-            height: wallet_tx.height,
-            unblinded_url: wallet_tx.unblinded_url("").clone(),
+            fee: wallet_tx.fee.clone(),
+            timestamp: wallet_tx.timestamp.clone(),
+            height: wallet_tx.height.clone(),
+            unblinded_url: wallet_tx.unblinded_url(""),
             vsize: wallet_tx.tx.discount_vsize(),
         }
     }

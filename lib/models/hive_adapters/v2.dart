@@ -1,8 +1,8 @@
 import 'dart:typed_data';
 
+import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart' show serializePaymentToJson, deserializePaymentFromJson;
 import 'package:hive_ce/hive.dart';
 import 'package:manna/models/account.dart';
-import 'package:manna/models/bolt12_offer.dart';
 import 'package:manna/models/chat_message.dart';
 import 'package:manna/models/contact.dart';
 import 'package:manna/models/setting_history_cache.dart';
@@ -28,7 +28,7 @@ void registerV2Adapters({bool force = false}) {
   Hive.registerAdapter(MapCommentAdapter(), override: true);
   Hive.registerAdapter(ChatConversationAdapter(), override: true);
   Hive.registerAdapter(MessageLogAdapter(), override: true);
-  Hive.registerAdapter(Bolt12OfferAdapter(), override: true);
+  // Hive.registerAdapter(SparkPaymentAdaptor(), override: true);
 
   Hive.registerAdapter(OutPointAdapter(), override: true);
   Hive.registerAdapter(TxOutSecretsAdapter(), override: true);
@@ -36,22 +36,7 @@ void registerV2Adapters({bool force = false}) {
   Hive.registerAdapter(TxOutAdapter(), override: true);
   Hive.registerAdapter(BalanceAdapter(), override: true);
   Hive.registerAdapter(TxAdapter(), override: true);
-  Hive.registerAdapter(PreImageAdapter(), override: true);
   Hive.registerAdapter(KeyPairAdapter(), override: true);
-  Hive.registerAdapter(SwapTreeDataAdapter(), override: true);
-  Hive.registerAdapter(LeafDataAdapter(), override: true);
-  Hive.registerAdapter(SubmarineSwapAdapter(), override: true);
-  Hive.registerAdapter(SubmarineResponseAdapter(), override: true);
-  Hive.registerAdapter(ReverseSwapAdapter(), override: true);
-  Hive.registerAdapter(ReverseResponseAdapter(), override: true);
-  Hive.registerAdapter(ChainSwapAdapter(), override: true);
-  Hive.registerAdapter(ChainSwapDataAdapter(), override: true);
-  Hive.registerAdapter(SwapAdapter(), override: true);
-  Hive.registerAdapter(SwapTransactionAdapter(), override: true);
-
-  Hive.registerAdapter(ChainAdapter(), override: true);
-  Hive.registerAdapter(SwapTransactionTypeAdapter(), override: true);
-  Hive.registerAdapter(ChainSwapDirectionAdapter(), override: true);
 }
 
 /// Classes
@@ -101,23 +86,19 @@ class WalletAdapter extends TypeAdapter<Wallet> {
   @override
   Wallet read(BinaryReader reader) => Wallet(
     accountId: reader.readString(),
-    descriptor: reader.readString(),
     xpub: reader.readString(),
     network: Network.values[reader.readInt()],
     type: WalletType.values[reader.readInt()],
     balance: reader.readInt(),
-    isCorrupted: reader.readBool(),
   );
 
   @override
   void write(BinaryWriter writer, Wallet obj) {
     writer.writeString(obj.accountId);
-    writer.writeString(obj.descriptor);
     writer.writeString(obj.xpub);
     writer.writeInt(obj.network.index);
     writer.writeInt(obj.type.index);
     writer.writeInt(obj.balance);
-    writer.writeBool(obj.isCorrupted);
   }
 }
 
@@ -131,16 +112,14 @@ class TransactionAdapter extends TypeAdapter<Transaction> {
     txId: reader.readString(),
     network: Network.values[reader.readInt()],
     walletId: reader.readString(),
-    amount: reader.readInt(),
-    timestamp: reader.read() as DateTime,
-    isIncoming: reader.readBool(),
+    inner: deserializePaymentFromJson(jsonStr: reader.readString()),
     memo: reader.readString(),
     note: reader.readString(),
-    liquidTx: reader.read() as Tx?,
     isMemoSynced: reader.readBool(),
     senderUUID: reader.read() as String?,
     receiverUserNameOrUUID: reader.read() as String?,
     categories: (reader.read() as Set).cast<String>(),
+    extraMetadata: reader.readMap().cast<String, dynamic>(),
   );
 
   @override
@@ -148,16 +127,14 @@ class TransactionAdapter extends TypeAdapter<Transaction> {
     writer.writeString(obj.txId);
     writer.writeInt(obj.network.index);
     writer.writeString(obj.walletId);
-    writer.writeInt(obj.amount);
-    writer.write(obj.timestamp);
-    writer.writeBool(obj.isIncoming);
+    writer.writeString(serializePaymentToJson(payment: obj.inner));
     writer.writeString(obj.memo);
     writer.writeString(obj.note);
-    writer.write(obj.liquidTx);
     writer.writeBool(obj.isMemoSynced);
     writer.write(obj.senderUUID);
     writer.write(obj.receiverUserNameOrUUID);
     writer.write(obj.categories);
+    writer.writeMap(obj.extraMetadata);
   }
 }
 
@@ -443,28 +420,6 @@ class MessageLogAdapter extends TypeAdapter<MessageLog> {
   }
 }
 
-/// 13 [Bolt12Offer]
-class Bolt12OfferAdapter extends TypeAdapter<Bolt12Offer> {
-  @override
-  final typeId = 13;
-
-  @override
-  Bolt12Offer read(BinaryReader reader) => Bolt12Offer(
-    walletId: reader.readString(),
-    walletType: WalletType.values[reader.readInt()],
-    offer: reader.readString(),
-    signingKey: reader.read() as KeyPair,
-  );
-
-  @override
-  void write(BinaryWriter writer, Bolt12Offer obj) {
-    writer.writeString(obj.walletId);
-    writer.writeInt(obj.walletType.index);
-    writer.writeString(obj.offer);
-    writer.write(obj.signingKey);
-  }
-}
-
 /// Internal classes
 /// 51 - 68
 
@@ -602,23 +557,6 @@ class TxAdapter extends TypeAdapter<Tx> {
   }
 }
 
-/// 57 [PreImage]
-class PreImageAdapter extends TypeAdapter<PreImage> {
-  @override
-  final typeId = 57;
-
-  @override
-  PreImage read(BinaryReader reader) =>
-      PreImage(value: reader.readString(), sha256: reader.readString(), hash160: reader.readString());
-
-  @override
-  void write(BinaryWriter writer, PreImage obj) {
-    writer.writeString(obj.value);
-    writer.writeString(obj.sha256);
-    writer.writeString(obj.hash160);
-  }
-}
-
 /// 58 [KeyPair]
 class KeyPairAdapter extends TypeAdapter<KeyPair> {
   @override
@@ -632,335 +570,4 @@ class KeyPairAdapter extends TypeAdapter<KeyPair> {
     writer.writeByteList(obj.secretKey);
     writer.writeByteList(obj.publicKey);
   }
-}
-
-/// 59 [SwapTreeData]
-class SwapTreeDataAdapter extends TypeAdapter<SwapTreeData> {
-  @override
-  final typeId = 59;
-
-  @override
-  SwapTreeData read(BinaryReader reader) =>
-      SwapTreeData(claimLeaf: reader.read() as LeafData, refundLeaf: reader.read() as LeafData);
-
-  @override
-  void write(BinaryWriter writer, SwapTreeData obj) {
-    writer.write(obj.claimLeaf);
-    writer.write(obj.refundLeaf);
-  }
-}
-
-/// 60 [LeafData]
-class LeafDataAdapter extends TypeAdapter<LeafData> {
-  @override
-  final typeId = 60;
-
-  @override
-  LeafData read(BinaryReader reader) => LeafData(output: reader.readString(), version: reader.readInt());
-
-  @override
-  void write(BinaryWriter writer, LeafData obj) {
-    writer.writeString(obj.output);
-    writer.writeInt(obj.version);
-  }
-}
-
-/// 61 [SubmarineSwap]
-class SubmarineSwapAdapter extends TypeAdapter<SubmarineSwap> {
-  @override
-  final typeId = 61;
-
-  @override
-  SubmarineSwap read(BinaryReader reader) => SubmarineSwap(
-    from: reader.read() as Chain,
-    keys: reader.read() as KeyPair,
-    invoice: reader.readString(),
-    swapCreateRes: reader.read() as SubmarineResponse,
-  );
-
-  @override
-  void write(BinaryWriter writer, SubmarineSwap obj) {
-    writer.write(obj.from);
-    writer.write(obj.keys);
-    writer.writeString(obj.invoice);
-    writer.write(obj.swapCreateRes);
-  }
-}
-
-/// 62 [SubmarineResponse]
-class SubmarineResponseAdapter extends TypeAdapter<SubmarineResponse> {
-  @override
-  final typeId = 62;
-
-  @override
-  SubmarineResponse read(BinaryReader reader) => SubmarineResponse(
-    acceptZeroConf: reader.readBool(),
-    address: reader.readString(),
-    bip21: reader.readString(),
-    claimPublicKey: reader.readString(),
-    expectedAmount: reader.read() as BigInt,
-    swapTree: reader.read() as SwapTreeData,
-    timeoutBlockHeight: reader.read() as BigInt,
-    blindingKey: reader.read() as String?,
-  );
-
-  @override
-  void write(BinaryWriter writer, SubmarineResponse obj) {
-    writer.writeBool(obj.acceptZeroConf);
-    writer.writeString(obj.address);
-    writer.writeString(obj.bip21);
-    writer.writeString(obj.claimPublicKey);
-    writer.write(obj.expectedAmount);
-    writer.write(obj.swapTree);
-    writer.write(obj.timeoutBlockHeight);
-    writer.write(obj.blindingKey);
-  }
-}
-
-/// 63 [ReverseSwap]
-class ReverseSwapAdapter extends TypeAdapter<ReverseSwap> {
-  @override
-  final typeId = 63;
-
-  @override
-  ReverseSwap read(BinaryReader reader) => ReverseSwap(
-    to: reader.read() as Chain,
-    keys: reader.read() as KeyPair,
-    swapCreateRes: reader.read() as ReverseResponse,
-  );
-
-  @override
-  void write(BinaryWriter writer, ReverseSwap obj) {
-    writer.write(obj.to);
-    writer.write(obj.keys);
-    writer.write(obj.swapCreateRes);
-  }
-}
-
-/// 64 [ReverseResponse]
-class ReverseResponseAdapter extends TypeAdapter<ReverseResponse> {
-  @override
-  final typeId = 64;
-
-  @override
-  ReverseResponse read(BinaryReader reader) => ReverseResponse(
-    invoice: reader.read() as String?,
-    swapTree: reader.read() as SwapTreeData,
-    lockupAddress: reader.readString(),
-    refundPublicKey: reader.readString(),
-    timeoutBlockHeight: reader.readInt(),
-    onchainAmount: reader.read() as BigInt,
-    blindingKey: reader.read() as String?,
-  );
-
-  @override
-  void write(BinaryWriter writer, ReverseResponse obj) {
-    writer.write(obj.invoice);
-    writer.write(obj.swapTree);
-    writer.writeString(obj.lockupAddress);
-    writer.writeString(obj.refundPublicKey);
-    writer.writeInt(obj.timeoutBlockHeight);
-    writer.write(obj.onchainAmount);
-    writer.write(obj.blindingKey);
-  }
-}
-
-/// 65 [ChainSwap]
-class ChainSwapAdapter extends TypeAdapter<ChainSwap> {
-  @override
-  final typeId = 65;
-
-  @override
-  ChainSwap read(BinaryReader reader) => ChainSwap(
-    direction: reader.read() as ChainSwapDirection,
-    refundKeys: reader.read() as KeyPair,
-    claimKeys: reader.read() as KeyPair,
-    lockupDetails: reader.read() as ChainSwapData,
-    claimDetails: reader.read() as ChainSwapData,
-  );
-
-  @override
-  void write(BinaryWriter writer, ChainSwap obj) {
-    writer.write(obj.direction);
-    writer.write(obj.refundKeys);
-    writer.write(obj.claimKeys);
-    writer.write(obj.lockupDetails);
-    writer.write(obj.claimDetails);
-  }
-}
-
-/// 66 [ChainSwapData]
-class ChainSwapDataAdapter extends TypeAdapter<ChainSwapData> {
-  @override
-  final typeId = 66;
-
-  @override
-  ChainSwapData read(BinaryReader reader) => ChainSwapData(
-    swapTree: reader.read() as SwapTreeData,
-    lockupAddress: reader.readString(),
-    serverPublicKey: reader.readString(),
-    timeoutBlockHeight: reader.readInt(),
-    amount: reader.read() as BigInt,
-    blindingKey: reader.read() as String?,
-    refundAddress: reader.read() as String?,
-    claimAddress: reader.read() as String?,
-    bip21: reader.read() as String?,
-  );
-
-  @override
-  void write(BinaryWriter writer, ChainSwapData obj) {
-    writer.write(obj.swapTree);
-    writer.writeString(obj.lockupAddress);
-    writer.writeString(obj.serverPublicKey);
-    writer.writeInt(obj.timeoutBlockHeight);
-    writer.write(obj.amount);
-    writer.write(obj.blindingKey);
-    writer.write(obj.refundAddress);
-    writer.write(obj.claimAddress);
-    writer.write(obj.bip21);
-  }
-}
-
-/// 67 [Swap]
-class SwapAdapter extends TypeAdapter<Swap> {
-  @override
-  final typeId = 67;
-
-  @override
-  Swap read(BinaryReader reader) => Swap(
-    id: reader.readString(),
-    index: (reader.read() as BigInt).toInt(),
-    walletId: reader.readString(),
-    walletType: WalletType.values[reader.readInt()],
-    network: Network.values[reader.readInt()],
-    preimage: reader.read() as PreImage,
-    sendAmount: reader.read() as BigInt,
-    receiveAmount: reader.read() as BigInt,
-    creationTime: reader.read() as BigInt,
-    completionTime: reader.read() as BigInt?,
-    submarine: reader.read() as SubmarineSwap?,
-    reverse: reader.read() as ReverseSwap?,
-    chain: reader.read() as ChainSwap?,
-    swapStatus: reader.readString(),
-    failureReason: reader.read() as String?,
-    note: reader.read() as String?,
-    boltzFee: reader.read() as BigInt?,
-    lockupFee: reader.read() as BigInt?,
-    claimFee: reader.read() as BigInt?,
-    refundedAddress: reader.read() as String?,
-    refundFee: reader.read() as BigInt?,
-    transactions: (reader.read() as List).cast<SwapTransaction>(),
-    isExchangeSwap: reader.readBool(),
-  );
-
-  @override
-  void write(BinaryWriter writer, Swap obj) {
-    writer.writeString(obj.id);
-    writer.write(BigInt.from(obj.index));
-    writer.writeString(obj.walletId);
-    writer.writeInt(obj.walletType.index);
-    writer.writeInt(obj.network.index);
-    writer.write(obj.preimage);
-    writer.write(obj.sendAmount);
-    writer.write(obj.receiveAmount);
-    writer.write(obj.creationTime);
-    writer.write(obj.completionTime);
-    writer.write(obj.submarine);
-    writer.write(obj.reverse);
-    writer.write(obj.chain);
-    writer.writeString(obj.swapStatus);
-    writer.write(obj.failureReason);
-    writer.write(obj.note);
-    writer.write(obj.boltzFee);
-    writer.write(obj.lockupFee);
-    writer.write(obj.claimFee);
-    writer.write(obj.refundedAddress);
-    writer.write(obj.refundFee);
-    writer.write(obj.transactions);
-    writer.writeBool(obj.isExchangeSwap);
-  }
-}
-
-/// 68 [SwapTransaction]
-class SwapTransactionAdapter extends TypeAdapter<SwapTransaction> {
-  @override
-  final typeId = 68;
-
-  @override
-  SwapTransaction read(BinaryReader reader) => SwapTransaction(
-    txId: reader.readString(),
-    chain: reader.read() as Chain,
-    txType: reader.read() as SwapTransactionType,
-    isUser: reader.readBool(),
-  );
-
-  @override
-  void write(BinaryWriter writer, SwapTransaction obj) {
-    writer.writeString(obj.txId);
-    writer.write(obj.chain);
-    writer.write(obj.txType);
-    writer.writeBool(obj.isUser);
-  }
-}
-
-/// Enums
-/// 100 - 106
-
-/// 104 [Chain]
-class ChainAdapter extends TypeAdapter<Chain> {
-  @override
-  final typeId = 104;
-
-  @override
-  Chain read(BinaryReader reader) => switch (reader.readByte()) {
-    0 => Chain.bitcoin,
-    1 => Chain.liquid,
-    _ => Chain.bitcoin,
-  };
-
-  @override
-  void write(BinaryWriter writer, Chain obj) => switch (obj) {
-    Chain.bitcoin => writer.writeByte(0),
-    Chain.liquid => writer.writeByte(1),
-  };
-}
-
-/// 105 [SwapTransactionType]
-class SwapTransactionTypeAdapter extends TypeAdapter<SwapTransactionType> {
-  @override
-  final typeId = 105;
-
-  @override
-  SwapTransactionType read(BinaryReader reader) => switch (reader.readByte()) {
-    0 => SwapTransactionType.lockup,
-    1 => SwapTransactionType.claim,
-    2 => SwapTransactionType.refund,
-    _ => SwapTransactionType.lockup,
-  };
-
-  @override
-  void write(BinaryWriter writer, SwapTransactionType obj) => switch (obj) {
-    SwapTransactionType.lockup => writer.writeByte(0),
-    SwapTransactionType.claim => writer.writeByte(1),
-    SwapTransactionType.refund => writer.writeByte(2),
-  };
-}
-
-/// 106 [ChainSwapDirection]
-class ChainSwapDirectionAdapter extends TypeAdapter<ChainSwapDirection> {
-  @override
-  final typeId = 106;
-
-  @override
-  ChainSwapDirection read(BinaryReader reader) => switch (reader.readByte()) {
-    0 => ChainSwapDirection.btcToLbtc,
-    1 => ChainSwapDirection.lbtcToBtc,
-    _ => ChainSwapDirection.btcToLbtc,
-  };
-
-  @override
-  void write(BinaryWriter writer, ChainSwapDirection obj) => switch (obj) {
-    ChainSwapDirection.btcToLbtc => writer.writeByte(0),
-    ChainSwapDirection.lbtcToBtc => writer.writeByte(1),
-  };
 }

@@ -3,19 +3,19 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
-import 'package:convert/convert.dart';
-import 'package:crypto/crypto.dart';
+import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart'
+    show GetInfoRequest, PaymentDetails_Lightning, RegisterWebhookRequest, WebhookEventType, Webhook;
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:html_rich_text/html_rich_text.dart';
+import 'package:http/http.dart' as http;
 import 'package:manna/app_state.dart';
 import 'package:manna/config.dart';
 import 'package:manna/globals.dart';
 import 'package:manna/models/account.dart';
-import 'package:manna/models/bolt12_offer.dart';
 import 'package:manna/models/contact.dart';
 import 'package:manna/models/misc.dart';
 import 'package:manna/models/setting_history_cache.dart';
-import 'package:manna/models/swap.dart';
 import 'package:manna/models/wallet.dart';
 import 'package:manna/router.dart';
 import 'package:manna/screens/menu_screen.dart';
@@ -26,6 +26,7 @@ import 'package:manna/services/log_service.dart';
 import 'package:manna/services/nostr_service.dart';
 import 'package:manna/services/notification_service.dart';
 import 'package:manna/services/wallet_service.dart';
+import 'package:manna/theme.dart';
 import 'package:manna/utils/constants.dart';
 import 'package:manna/utils/de_bouncer.dart';
 import 'package:manna/utils/extensions.dart';
@@ -36,8 +37,8 @@ import 'package:manna_core/manna_core.dart' hide Wallet;
 import 'package:native_dio_adapter/native_dio_adapter.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide MultipartFile;
+import 'package:url_launcher/url_launcher_string.dart';
 import 'package:uuid/uuid.dart';
-import 'package:http/http.dart' as http;
 
 //note: the batching for in filter query is to mitigate cloudflare's limit to process 32kb url params
 class DbService {
@@ -85,7 +86,6 @@ class DbService {
           stackTrace: s,
           showToast: failCount > 4,
           title: 'Failed to communicate with backend service! (${network.name})',
-          includeErrorInToast: false,
         );
       }
     }
@@ -173,7 +173,18 @@ class DbService {
               context: AppRouter.navigatorContext,
               builder: (context) => AlertDialog(
                 title: Text(title),
-                content: Text(message),
+                content: SingleChildScrollView(
+                  child: HtmlRichText(
+                    message,
+                    onLinkTap: (url) => launchUrlString(url),
+                    tagStyles: const {
+                      'b': TextStyle(fontWeight: FontWeight.bold),
+                      'i': TextStyle(fontStyle: FontStyle.italic),
+                      'strong': TextStyle(fontWeight: FontWeight.w900, color: AppColors.primaryColor),
+                      'u': TextStyle(decoration: TextDecoration.underline),
+                    },
+                  ),
+                ),
                 actions: [TextButton(child: const Text('Acknowledge'), onPressed: () => AppRouter.pop())],
               ),
             );
@@ -212,22 +223,6 @@ class DbService {
   static Future<void> syncEverything() async {
     isSyncing.value = true;
     await syncWalletData(network: Config.network);
-    await cacheBolt12Offers();
-
-    await Future.wait([
-      linkMemosToTransactions(network: Network.mainnet),
-      if (Config.isRegtestOn) linkMemosToTransactions(network: Network.regtest),
-    ]);
-
-    await Future.wait([
-      fetchCompletedLNURLSwaps(network: Network.mainnet),
-      if (Config.isRegtestOn) fetchCompletedLNURLSwaps(network: Network.regtest),
-    ]);
-    await Future.wait([
-      cacheSwaps(network: Network.mainnet),
-      if (Config.isRegtestOn) cacheSwaps(network: Network.regtest),
-    ]);
-    await pushCompletedSwaps();
 
     // sync wallet for secondary chain
     if (Config.isRegtestOn) {
@@ -265,45 +260,26 @@ class DbService {
     btcPriceSubscription = null;
   }
 
-  static Future<int?> getSwapIndex(Wallet wallet) async {
-    if (wallet.type == WalletType.watchOnly) {
-      final row = await useSupabase(
-        (supabase) async =>
-            supabase.from('watch_only_wallets').select('swap_index').eq('wallet_uuid', wallet.uuid).maybeSingle(),
-        network: wallet.network,
-      );
-      if (row != null && row['swap_index'] != null) return parseInt(row['swap_index']);
-    }
-
-    final row = await useSupabase(
-      (supabase) async => supabase.from('wallets').select('swap_index').eq('uuid', wallet.uuid).maybeSingle(),
-      network: wallet.network,
-    );
-    if (row != null && row['swap_index'] != null) return parseInt(row['swap_index']);
-    return null;
-  }
-
   static Future<void> syncWalletData({Network? network}) async {
     final Map<Network, Set<String>> activeFullWalletIds = {};
-    final Map<Network, Set<String>> activeWoWalletIds = {};
+    final List<Wallet> activeWallets = [];
     final activeAccountIds = DB.activeAccounts.map((e) => e.id).toSet();
+
     for (final w in DB.allWallets) {
       if (!activeAccountIds.contains(w.accountId)) continue;
       if (w.network == Network.regtest && !Config.isRegtestOn) continue;
 
+      activeWallets.add(w);
       if (w.type == WalletType.full) {
         (activeFullWalletIds[w.network] ??= {}).add(w.uuid);
-      } else if (w.type == WalletType.watchOnly) {
-        (activeWoWalletIds[w.network] ??= {}).add(w.uuid);
       }
     }
 
     if (network != null) {
       activeFullWalletIds.removeWhere((key, value) => key != network);
-      activeWoWalletIds.removeWhere((key, value) => key != network);
     }
 
-    if (activeFullWalletIds.isEmpty && activeWoWalletIds.isEmpty) return;
+    if (activeFullWalletIds.isEmpty) return;
 
     final deviceId = await getDeviceId();
     final fcmToken = await NotificationService.getFCMToken();
@@ -316,94 +292,96 @@ class DbService {
             useSupabase((supabase) async {
               final rows = await supabase
                   .from('wallets')
-                  .select('uuid, swap_index, use_trusted_lnurl, user_name, bolt11_short_desc, about, picture, banner')
+                  .select('uuid, user_name, bolt11_short_desc, about, picture, banner')
                   .inFilter('uuid', e.value.toList());
               for (final e in parseList(rows, (e) => WalletMetaData.fromMap(e))) {
                 walletDataMap['${e.uuid}_${WalletType.full.name}'] = e;
               }
             }, network: e.key),
-
-      if (activeWoWalletIds.isNotEmpty)
-        for (final e in activeWoWalletIds.entries)
-          if (e.value.isNotEmpty)
-            useSupabase((supabase) async {
-              final rows = await supabase
-                  .from('wallets')
-                  .select(
-                    'uuid, user_name, bolt11_short_desc, about, picture, banner, wo_swap_index: watch_only_wallets(swap_index), use_trusted_lnurl',
-                  )
-                  .eq('watch_only_wallets.device_id', deviceId)
-                  .inFilter('uuid', e.value.toList());
-              for (final e in parseList(rows, (e) => WalletMetaData.fromMapWO(e))) {
-                walletDataMap['${e.uuid}_${WalletType.watchOnly.name}'] = e;
-              }
-            }, network: e.key),
     ]);
-
-    // update local state of use_trusted_lnurl if it changed on other devices.
-    final trustMinimizedLNURLAccounts = AppState.trustMinimizedLNURLAccounts;
-    for (final MapEntry(key: wId, value: e) in walletDataMap.entries) {
-      final idSplit = wId.split('_');
-      final w = DB.allWallets.where((w) => w.uuid == idSplit[0] && w.type.name == idSplit[1]).firstOrNull;
-      if (w == null) continue;
-
-      if (e.useTrustedLNURL) {
-        trustMinimizedLNURLAccounts.remove(w.accountId);
-      } else {
-        trustMinimizedLNURLAccounts.add(w.accountId);
-      }
-    }
-    AppState.trustMinimizedLNURLAccounts = trustMinimizedLNURLAccounts.toList();
 
     GlobalListener.update(stream: .account);
 
-    // account : data to update
-    unawaited(
-      upsertWallets({
-        if (network != null)
-          ...await getRecycledLNURLPool(network)
-        else ...{
-          ...await getRecycledLNURLPool(Network.mainnet),
-          if (Config.isRegtestOn) ...await getRecycledLNURLPool(Network.regtest),
-        },
-      }),
+    {
+      // Update notification token
+      final activeWalletIds = Map.of(activeFullWalletIds);
+      if (fcmToken?.isNotEmpty == true && activeWalletIds.isNotEmpty) {
+        final packageInfo = await PackageInfo.fromPlatform();
+
+        await Future.wait([
+          for (final e in activeWalletIds.entries)
+            if (e.value.isNotEmpty)
+              useSupabase((supabase) async {
+                try {
+                  await supabase
+                      .from('devices')
+                      .upsert(
+                        e.value
+                            .map(
+                              (wId) => {
+                                'wallet_uuid': wId,
+                                'device_id': deviceId,
+                                'fcm_token': fcmToken,
+                                'platform': Platform.operatingSystem,
+                                'last_active_at': DateTime.now(),
+                                'app_version': '${packageInfo.version}+${packageInfo.buildNumber}',
+                              }.toEncodeReady(),
+                            )
+                            .toList(),
+                        defaultToNull: false,
+                      );
+                } catch (e, s) {
+                  logE(e, stackTrace: s);
+                }
+              }, network: e.key),
+        ]);
+      }
+    }
+
+    await upsertWallets(
+      Map.fromEntries(
+        await Future.wait(
+          activeWallets.map((wallet) async {
+            final sp = wallet.spark;
+            final account = wallet.account;
+            return MapEntry(wallet, {
+              if (sp != null) ...{
+                'identity_pub_key': (await sp.getInfo(request: const GetInfoRequest())).identityPubkey,
+              },
+              if (account.chatKeyPair != null) 'chat_pubkey': base64Encode(account.chatKeyPair!.publicKey),
+              if (account.nsec != null) 'npub': account.nsec!.nsecToNpub,
+            });
+          }),
+        ),
+      ),
     );
 
-    // Update notification token
-    final activeWalletIds = Map.of(activeFullWalletIds);
-    for (final e in activeWoWalletIds.entries) {
-      (activeWalletIds[e.key] ??= {}).addAll(e.value);
-    }
-    if (fcmToken?.isNotEmpty == true && activeWalletIds.isNotEmpty) {
-      final packageInfo = await PackageInfo.fromPlatform();
+    {
+      // setup webhooks for notification
+      final webHookUrl = Config.sparkWebhookUrl;
+      if (webHookUrl != null) {
+        await Future.wait(
+          activeWallets.where((w) => w.network == Config.network).map((w) async {
+            for (final webhook in await w.spark?.listWebhooks() ?? <Webhook>[]) {
+              if (webhook.eventTypes.contains(const WebhookEventType.lightningReceiveFinished())) return;
+            }
 
-      await Future.wait([
-        for (final e in activeWalletIds.entries)
-          if (e.value.isNotEmpty)
-            useSupabase((supabase) async {
-              try {
-                await supabase
-                    .from('devices')
-                    .upsert(
-                      e.value
-                          .map(
-                            (wId) => {
-                              'wallet_uuid': wId,
-                              'device_id': deviceId,
-                              'fcm_token': fcmToken,
-                              'platform': Platform.operatingSystem,
-                              'last_active_at': DateTime.now(),
-                              'app_version': '${packageInfo.version}+${packageInfo.buildNumber}',
-                            }.toEncodeReady(),
-                          )
-                          .toList(),
-                      defaultToNull: false,
-                    );
-              } catch (e, s) {
-                logE(e, stackTrace: s);
-              }
-            }, network: e.key),
-      ]);
+            await w.spark?.registerWebhook(
+              request: RegisterWebhookRequest(
+                url: webHookUrl,
+                secret: 'MAYAINEVERSUCEEDMAYEVERYONEBEHAPPY',
+                eventTypes: [
+                  // WebhookEventType.staticDepositFinished(),
+                  // WebhookEventType.coopExitFinished(),
+                  const WebhookEventType.lightningReceiveFinished(),
+                  // WebhookEventType.lightningSendFinished(),
+                ],
+              ),
+            );
+            logI('registered webhook: ${w.uuid}');
+          }),
+        );
+      }
     }
 
     GlobalListener.update(stream: .account);
@@ -425,16 +403,12 @@ class DbService {
             derivationPath: '${liquidDerivationPath(network: wallet.network)}/2',
           );
         }
-        final swapEncPubKey = (await Crypto.getSwapEncryptionKey(
-          swapMnemonic: await wallet.getSwapMnemonic(),
-        ))?.publicKey;
 
         final payload = {
           ...data,
 
           'uuid': wallet.uuid,
           'wallet_xpub': wallet.xpub,
-          if (swapEncPubKey != null) 'swap_enc_pub_key': hex.encode(swapEncPubKey),
           'timestamp': DateTime.now().millisecondsSinceEpoch,
         };
 
@@ -451,14 +425,6 @@ class DbService {
             (value) => value..update(WalletType.full, (value) => value..add(data), ifAbsent: () => [data]),
             ifAbsent: () => {
               WalletType.full: [data],
-            },
-          );
-        } else if (wallet.type == WalletType.watchOnly) {
-          walletData.update(
-            wallet.network,
-            (value) => value..update(WalletType.watchOnly, (value) => value..add(payload), ifAbsent: () => [payload]),
-            ifAbsent: () => {
-              WalletType.watchOnly: [payload],
             },
           );
         }
@@ -482,7 +448,8 @@ class DbService {
         final payload = jsonEncode(
           {
             'walletData': data[WalletType.full] ?? [],
-            'watchOnlyWalletData': data[WalletType.watchOnly] ?? [],
+            'watchOnlyWalletData': [],
+            // 'watchOnlyWalletData': data[WalletType.watchOnly] ?? [],
             'device_id': appSetId,
             'fcm_token': ?fcmToken,
             'platform': Platform.operatingSystem,
@@ -500,9 +467,7 @@ class DbService {
           if (network == Config.network) {
             for (final e in res.data) {
               final walletData = WalletMetaData.fromMap(e);
-              if (parseBool(e['is_watch_only'])) {
-                walletDataMap['${walletData.uuid}_${WalletType.watchOnly.name}'] = walletData;
-              } else {
+              if (!parseBool(e['is_watch_only'])) {
                 walletDataMap['${walletData.uuid}_${WalletType.full.name}'] = walletData;
               }
             }
@@ -519,192 +484,6 @@ class DbService {
       logE(e, stackTrace: s, showToast: true);
     }
     return false;
-  }
-
-  static Future<void> cacheBolt12Offers() async {
-    final Map<Network, List<Wallet>> wallets = {};
-    final activeAccountIds = DB.activeAccounts.map((e) => e.id).toSet();
-    for (final w in DB.allWallets) {
-      if (!activeAccountIds.contains(w.accountId)) continue;
-      if (w.network == Network.regtest && !Config.isRegtestOn) continue;
-
-      (wallets[w.network] ??= []).add(w);
-    }
-    if (wallets.isEmpty) return;
-
-    final trustMinimizedBolt12Accounts = AppState.trustMinimizedBolt12Accounts;
-
-    await Future.wait([
-      for (final e in wallets.entries)
-        if (e.value.isNotEmpty)
-          useSupabase((supabase) async {
-            final rows = await supabase
-                .from('bolt12_offers')
-                .select('wallet_id, is_watch_only, offer, signing_key')
-                .inFilter('wallet_id', e.value.map((e) => e.uuid).toList());
-            for (final row in rows) {
-              final offerStr = parseString(row['offer']);
-              if (offerStr.trim().isEmpty) continue;
-
-              final w = e.value
-                  .where(
-                    (w) =>
-                        w.uuid == parseString(row['wallet_id']) &&
-                        (parseBool(row['is_watch_only']) ? w.type == WalletType.watchOnly : w.type == WalletType.full),
-                  )
-                  .firstOrNull;
-              if (w == null) continue;
-
-              try {
-                final signingKeyPair = await (await MasterSwapKey.fromMnemonic(
-                  mnemonic: await w.getSwapMnemonic(),
-                  network: w.network,
-                )).getBolt12SigningKey(index: 0);
-                final offer = Bolt12Offer(
-                  walletId: w.uuid,
-                  walletType: w.type,
-                  offer: offerStr,
-                  signingKey: signingKeyPair,
-                );
-                if (DB.bolt12Offers[offer.id] == null) {
-                  await offer.save();
-                }
-
-                if (parseString(row['signing_key']).trim().isEmpty) {
-                  trustMinimizedBolt12Accounts.add(w.accountId);
-                } else {
-                  trustMinimizedBolt12Accounts.remove(w.accountId);
-                }
-              } catch (e, s) {
-                logE(e, stackTrace: s);
-              }
-            }
-            AppState.trustMinimizedBolt12Accounts = trustMinimizedBolt12Accounts.toList();
-          }, network: e.key),
-    ]);
-  }
-
-  static Future<bool> upsertBolt12Offers(List<Bolt12Offer> offers) async {
-    if (offers.isEmpty) return false;
-
-    final trustMinimizedBolt12Accounts = AppState.trustMinimizedBolt12Accounts;
-    final Map<Network, List<dynamic>> offerData = {};
-    for (final offer in offers) {
-      try {
-        final wallet = DB.allWallets.where((w) => w.uuid == offer.walletId && w.type == offer.walletType).firstOrNull;
-        if (wallet == null) continue;
-        if (wallet.network == Network.regtest && !Config.isRegtestOn) continue;
-
-        U8Array32? privateKey;
-        if (wallet.type == WalletType.full) {
-          privateKey = await getDerivationPrivKey(
-            accountId: wallet.accountId,
-            derivationPath: '${liquidDerivationPath(network: wallet.network)}/2',
-          );
-        }
-
-        final payload = {
-          'wallet_id': offer.walletId,
-          'is_watch_only': wallet.type == WalletType.watchOnly,
-          'offer': offer.offer,
-          if (!trustMinimizedBolt12Accounts.contains(offer.wallet?.accountId))
-            'signing_key': offer.signingKey.secretKey.toHexString,
-          'timestamp': DateTime.now().millisecondsSinceEpoch,
-        };
-
-        if (privateKey != null) {
-          final signature = await Crypto.secp256K1Sign(
-            privKey: privateKey,
-            message: utf8.encode(sortedJsonEncode(payload)),
-            returnDer: false,
-            preHash: true,
-          );
-          (offerData[wallet.network] ??= []).add({...payload, 'signature': signature.toHexString});
-        }
-      } catch (e, s) {
-        logE(e, stackTrace: s);
-      }
-    }
-
-    if (offerData.isEmpty) return false;
-    try {
-      final futures = offerData.entries.map((e) async {
-        final MapEntry(key: network, value: offerData) = e;
-        final res = await globalDio.post(
-          Config.of(network).getServerApiEndpoint('upsertBolt12Offers'),
-          options: Options(headers: {'Authorization': 'Bearer ${await JWTService.getToken(network: network)}'}),
-          data: jsonEncode({'offers': offerData}.toEncodeReady()),
-        );
-        if (res.isSuccess) {
-          return true;
-        } else if (res.data is Map) {
-          ToastService.show('Bolt12 (${network.name}): ${res.data['error'] ?? 'Something went wrong!'}');
-          logE(res.data['error'], data: network);
-        }
-        return false;
-      });
-      return (await Future.wait(futures)).every((e) => e);
-    } catch (e, s) {
-      logE(e, stackTrace: s, showToast: true);
-    }
-    return false;
-  }
-
-  // returns wallet data map to update after recycling lnurl pool
-  static Future<Map<Wallet, Map<String, dynamic>>> getRecycledLNURLPool(Network network) async {
-    if (network == Network.regtest && !Config.isRegtestOn) return {};
-
-    final Map<Wallet, Map<String, dynamic>> walletData = {};
-
-    for (final account in DB.activeAccounts) {
-      try {
-        final wallet = DB.allWallets.where((w) => w.accountId == account.id && w.network == network).firstOrNull;
-        if (wallet == null) continue;
-        final liquidWallet = wallet.liquidWollet;
-        if (liquidWallet == null) continue;
-
-        // generate address pool
-        final Map<int, String> addressPool = {};
-        int? lastUsedIndex;
-        for (int i = 0; i < 50; i++) {
-          if (lastUsedIndex == null) {
-            final a = await liquidWallet.addressLastUnused();
-            lastUsedIndex = a.index;
-            addressPool[a.index ?? 0] = a.confidential;
-          } else {
-            final a = await liquidWallet.address(index: ++lastUsedIndex);
-            addressPool[a.index ?? 0] = a.confidential;
-          }
-        }
-
-        // generate lnurl pool based on swap index while passing the address pool for signatures
-        List<LnurlPoolEntry>? lnurlPool;
-        final swapMnemonics = await wallet.getSwapMnemonic();
-        int swapIndex = wallet.metaData?.swapIndex ?? 0;
-        final lnurlIndices = List.generate(15, (_) => swapIndex++);
-        if (lnurlIndices.length > addressPool.length) {
-          throw Exception('address pool and lnurl pool panic');
-        }
-
-        lnurlPool = await Crypto.generateLnurlPool(
-          swapMnemonics: swapMnemonics,
-          network: network,
-          indices: Uint64List.fromList(lnurlIndices),
-          addresses: addressPool.entries.map((e) => (e.key.bigInt, e.value)).take(lnurlIndices.length).toList(),
-        );
-
-        walletData[wallet] = {
-          'address_pool': addressPool.entries.map((e) => {'i': e.key, 'a': e.value}).toList(),
-          'lnurl_pool': lnurlPool.map((e) => e.toUploadMap()).nonNulls.toList(),
-
-          if (account.chatKeyPair != null) 'chat_pubkey': base64Encode(account.chatKeyPair!.publicKey),
-          if (account.nsec != null) 'npub': account.nsec!.nsecToNpub,
-        };
-      } catch (e, s) {
-        logE(e, stackTrace: s);
-      }
-    }
-    return walletData;
   }
 
   static Future<String?> uploadImage(File file, String bucket, {String path = 'uploads'}) async {
@@ -812,41 +591,38 @@ class DbService {
     });
   }
 
-  static Future<Contact?> getContact({String? userName, String? uuid, Wallet? wallet}) => useSupabase((supabase) async {
-    if (userName == null && uuid == null) return null;
-    final query = supabase
-        .from('wallets')
-        .select('uuid, user_name, picture, about, banner, npub, wallet_chat_keys(pubkey)');
-    final data = await (userName != null ? query.eq('user_name', userName) : query.eq('uuid', uuid!)).maybeSingle();
-    if (data != null) {
-      return Contact.fromSupabaseMap(data, wallet ?? selectedWallet);
-    }
-    return null;
-  });
+  static Future<Contact?> getContact({String? userName, String? uuid, String? identityKey, Wallet? wallet}) =>
+      useSupabase((supabase) async {
+        if (userName == null && uuid == null && identityKey == null) return null;
+        final query = supabase
+            .from('wallets')
+            .select('uuid, user_name, picture, about, banner, npub, wallet_chat_keys(pubkey)');
+        final data =
+            await (userName != null
+                    ? query.eq('user_name', userName)
+                    : uuid != null
+                    ? query.eq('uuid', uuid)
+                    : query.eq('identity_pub_key', identityKey!))
+                .maybeSingle();
+        if (data != null) {
+          return Contact.fromSupabaseMap(data, wallet ?? selectedWallet);
+        }
+        return null;
+      });
 
-  static Future<String?> getWalletLiquidAddress(String userName) async {
+  static Future<String?> getSparkAddress(String userName) async {
     return useSupabase((supabase) async {
-      final res = await supabase
-          .from('wallets')
-          .select('wallet_xpub, addressEntry: address_pool->0')
-          .eq('user_name', userName)
-          .maybeSingle();
-      if (res != null && res['wallet_xpub'] != null && res['addressEntry'] != null) {
-        final xpub = parseString(res['wallet_xpub']);
-        final address = parseString(res['addressEntry']?['a']);
-        final addressIndex = parseInt(res['addressEntry']?['i']);
+      final res = await supabase.from('wallets').select('identity_pub_key').eq('user_name', userName).maybeSingle();
+      final pubKey = res?['identity_pub_key'];
 
-        if (await Crypto.validateLiquidAddress(
-          xpub: xpub,
-          address: address,
-          index: addressIndex,
-          network: Config.network,
-        )) {
-          return address;
-        } else {
-          ToastService.show('Cannot verify receiver address!');
+      if (pubKey is String && pubKey.length == 66) {
+        try {
+          return Crypto.encodeSparkAddress(identityPubKeyHex: pubKey, network: Config.network);
+        } catch (e, s) {
+          logE(e, stackTrace: s);
         }
       }
+
       ToastService.show('Cannot fetch receiver address!');
       return null;
     });
@@ -869,8 +645,8 @@ class DbService {
             network: Network.mainnet,
           ),
 
-        useSupabase((supabase) async {
-          if (Config.isRegtestOn) {
+        if (Config.isRegtestOn)
+          useSupabase((supabase) async {
             final wallet = DB.allWallets
                 .where((w) => w.accountId == account.id && w.network == Network.regtest)
                 .firstOrNull;
@@ -880,8 +656,7 @@ class DbService {
                 'device_id': appSetId,
               });
             }
-          }
-        }, network: Network.regtest),
+          }, network: Network.regtest),
       ]);
     } catch (e, s) {
       logE(e, stackTrace: s);
@@ -889,42 +664,26 @@ class DbService {
   }
 
   static Future<void> saveTxData({
-    required String txId,
     required String senderUUID,
-    required String? receiverLnurl,
-    required int amount,
-    required List<int> addressIndexes,
-    required String? note,
-    required bool sendNotification,
-  }) async {
-    String? receiverUUID = receiverLnurl;
-    // fetch receiver user's uuid if passed in lnurl username
-    if (receiverLnurl != null && receiverLnurl.isMannaUserName && receiverLnurl.getUserName != null) {
-      final res = await useSupabase(
-        (s) => s.from('wallets').select('uuid').eq('user_name', receiverLnurl.getUserName!).maybeSingle(),
-      );
-      if (res != null) {
-        receiverUUID = parseStringN(res['uuid']);
-      }
-    }
+    required String receiverLnurl,
+    required String txId,
 
-    try {
-      final payload = {
-        'txId': txId,
-        'sender_uuid': senderUUID,
-        'receiver_uuid': receiverUUID,
-        'amount': amount,
-        'note': note,
-        'addressIndexes': addressIndexes,
-        'sendNotification': sendNotification,
-      };
-      await globalDio.post(
-        Config.current.getServerApiEndpoint('saveTxData'),
-        options: Options(headers: {'Authorization': 'Bearer ${await JWTService.getToken()}'}),
-        data: jsonEncode(payload),
-      );
-    } catch (e, s) {
-      logE(e, stackTrace: s);
+    required String memo,
+  }) async {
+    // fetch receiver user's uuid if passed in lnurl username
+    if (receiverLnurl.isMannaUserName && receiverLnurl.getUserName != null) {
+      await useSupabase((s) async {
+        final res = await s.from('wallets').select('uuid').eq('user_name', receiverLnurl.getUserName!).maybeSingle();
+        if (res != null) {
+          final receiverUUID = parseStringN(res['uuid']);
+          await s.from('transaction_memos').insert({
+            'tx_id': txId,
+            'sender': senderUUID,
+            'receiver': receiverUUID,
+            'memo': memo,
+          });
+        }
+      });
     }
   }
 
@@ -942,15 +701,6 @@ class DbService {
       logE(e, stackTrace: s);
     }
   }
-
-  static Future<void> registerSwapWebhook(List<Swap> swaps) => useSupabase((supabase) async {
-    final fcmToken = await NotificationService.getFCMToken();
-    if (fcmToken != null) {
-      await supabase.from('swap_webhook').upsert([
-        for (final swap in swaps) {'swap_id': swap.id, 'wallet_id': swap.walletId, 'fcm_token': fcmToken},
-      ]);
-    }
-  });
 
   static final _linkMemoMutexMain = MutexRun();
   static final _linkMemoMutexRegtest = MutexRun();
@@ -970,27 +720,27 @@ class DbService {
             final txIds = batchTxs.map((e) => e.txId).toList();
 
             final data = await supabase
-                .from('transaction_data')
-                .select('tx_id, note, sender, receiver')
+                .from('transaction_memos')
+                .select('tx_id, sender, receiver, memo')
                 .inFilter('tx_id', txIds);
 
-            final Map<String, ({String? note, String sender, String? receiver})> rows = Map.fromEntries(
+            final Map<String, ({String? memo, String sender, String? receiver})> rows = Map.fromEntries(
               data.map(
                 (e) => MapEntry(parseString(e['tx_id']), (
-                  note: parseStringN(e['note']),
                   sender: parseString(e['sender']),
                   receiver: parseStringN(e['receiver']),
+                  memo: parseStringN(e['memo']),
                 )),
               ),
             );
             for (final tx in batchTxs) {
               final row = rows[tx.txId];
-              final memo = row?.note ?? tx.linkedSwap?.note;
+              final memo = row?.memo;
               final senderUUID = row?.sender;
               final receiverUUIDOrName = row?.receiver;
 
               await tx.update(
-                memo: memo?.isNotEmpty == true ? memo : null,
+                memo: (memo?.isNotEmpty ?? false) ? memo : null,
                 isMemoSynced: true,
                 senderUUID: Nullable(senderUUID),
                 receiverUserNameOrUUID: Nullable(receiverUUIDOrName),
@@ -1014,52 +764,21 @@ class DbService {
           }
         }, network: network);
 
+        final List<Future> saveFutures = [];
+        for (final tx in DB.transactions.values.where((tx) => tx.memo.isEmpty)) {
+          if (tx.inner.details == null) {
+            continue;
+          } else if (tx.inner.details case PaymentDetails_Lightning(:final description)) {
+            saveFutures.add(tx.update(memo: description));
+            count++;
+          }
+        }
+        await Future.wait(saveFutures);
+
         logD('(${network.name}) Linked $count memos!');
         GlobalListener.update(stream: .account);
         if (shouldCacheContacts) {
           await cacheContacts(network: network);
-        }
-      } catch (e, s) {
-        logE(e, stackTrace: s);
-      }
-    });
-  }
-
-  static final _cacheSwapMutexMain = MutexRun();
-  static final _cacheSwapMutexRegtest = MutexRun();
-  static Future<void> cacheSwaps({required Network network}) async {
-    final walletIds = DB.allWallets.where((w) => w.network == network).map((w) => w.uuid).toSet();
-    if (walletIds.isEmpty) return;
-
-    return (network == Network.mainnet ? _cacheSwapMutexMain : _cacheSwapMutexRegtest).run(() async {
-      try {
-        final syncedSwapIds = DB.getSyncedSwapIds();
-        // remove ids which doesn't exists locally
-        syncedSwapIds.removeWhere((e) => DB.swaps[e] == null);
-        final Set<String> newSyncedSwapIds = {};
-
-        // Fetch already completed swaps that are not available on device
-        final rows = await useSupabase(
-          (supabase) =>
-              supabase.rpc('get_swaps', params: {'wallet_ids': walletIds.toList(), 'swap_ids': syncedSwapIds}),
-          network: network,
-        );
-
-        if (rows is List && rows.isNotEmpty) {
-          final futures = rows.map((e) async {
-            final swap = await SwapExtension.fromSupabaseRow(e, network);
-            if (swap != null) {
-              await swap.save();
-              newSyncedSwapIds.add(swap.id);
-            }
-          });
-          await Future.wait(futures);
-
-          if (newSyncedSwapIds.isNotEmpty) {
-            await DB.setSyncedSwapIds({...DB.getSyncedSwapIds(), ...newSyncedSwapIds}.toList());
-            logD('(${network.name}) Fetched ${newSyncedSwapIds.length} swaps!');
-            GlobalListener.update(stream: .account);
-          }
         }
       } catch (e, s) {
         logE(e, stackTrace: s);
@@ -1153,10 +872,7 @@ class DbService {
   // cache btc historic price
   static Future<void> cacheBTCPrices() async {
     await useSupabase((supabase) async {
-      final timesToFetch = [
-        ...DB.transactions.values.map((e) => e.txTimestamp.toUtc()),
-        ...DB.swaps.values.map((e) => e.creationTimeUTC.toUtc()),
-      ];
+      final timesToFetch = [...DB.transactions.values.map((e) => e.timestamp.toUtc())];
 
       final Set<int> existingSeconds = DB.btcPriceHistoryBox.keys.cast<int>().toSet();
       final cutoff = DateTime(2025, 11);
@@ -1198,252 +914,6 @@ class DbService {
       }
       return null;
     });
-  }
-
-  static final pushSwapMutex = MutexRun();
-  static Future<void> pushCompletedSwaps() async {
-    // save encrypted completed swaps in backend.
-    await pushSwapMutex.run(() async {
-      try {
-        final alreadyPushedSwaps = DB.getSyncedSwapIds();
-
-        final Map<Network, List<Swap>> nonSyncedSwaps = {};
-        final activeAccountIds = DB.activeAccounts.map((acc) => acc.id).toSet();
-        final activeWalletMetaIds = DB.allWallets
-            .where((w) => activeAccountIds.contains(w.accountId))
-            .map((w) => '${w.uuid}_${w.type.index}');
-        for (final swap in DB.swaps.values.where(
-          (e) => e.isClosed && isFinalSwapState(swap: e).$2 && !alreadyPushedSwaps.contains(e.id),
-        )) {
-          if (!activeWalletMetaIds.contains('${swap.walletId}_${swap.walletType.index}')) continue;
-          if (swap.network == Network.regtest && !Config.isRegtestOn) continue;
-
-          (nonSyncedSwaps[swap.network] ??= []).add(swap);
-        }
-        if (nonSyncedSwaps.isEmpty) return;
-
-        int count = 0;
-        for (final MapEntry(key: network, value: swaps) in nonSyncedSwaps.entries) {
-          final swapData = (await Future.wait(
-            swaps.map((e) => e.encryptForSupabase()),
-          )).nonNulls.map((e) => e.toEncodeReady()).toList();
-
-          final txStatsDataMap = Map.fromEntries(
-            swaps.map(
-              (s) => MapEntry(
-                s.id,
-                {
-                  'swap_hash': hex.encode(sha256.convert(utf8.encode(s.id)).bytes),
-                  'amount': s.sendAmount,
-                  // 1: ln->lbtc 2: btc->lbtc 3: lbtc->ln 4: lbtc->btc
-                  'type': s.submarine != null
-                      ? 3
-                      : s.reverse != null
-                      ? 1
-                      : s.chain != null
-                      ? s.chain!.direction == ChainSwapDirection.btcToLbtc
-                            ? 2
-                            : 4
-                      : null,
-                  'created_at': DateTime.fromMillisecondsSinceEpoch(s.creationTime.i),
-                }.toEncodeReady(),
-              ),
-            ),
-          );
-
-          try {
-            await useSupabase((supabase) async {
-              for (int i = 0; i < swapData.length; i += 10) {
-                final List<Map<String, dynamic>> batchData = swapData.sublist(i, math.min(i + 10, swapData.length));
-                final swapIds = (await supabase.from('mobile_swaps').upsert(batchData).select('id'))
-                    .map((e) => parseString(e['id']))
-                    .toSet();
-                await DB.setSyncedSwapIds({...DB.getSyncedSwapIds(), ...swapIds}.toList());
-                count += swapIds.length;
-
-                await supabase
-                    .from('tx_stats')
-                    .insert(swapIds.map((swapId) => txStatsDataMap[swapId]).nonNulls.toList());
-              }
-            }, network: network);
-          } catch (_) {}
-        }
-
-        if (count > 0) {
-          logI('Pushed $count swaps!');
-        }
-      } catch (_) {}
-    });
-  }
-
-  static Future<void> fetchPendingLNURLSwaps(Network network) async {
-    final token = await JWTService.getToken(network: network);
-    if (token == null) return;
-
-    logD('($network) fetching LNURL swaps');
-    try {
-      final fetchedSwaps = await LnurlUtil.fetchLnurlSwaps(
-        liquidWallets: await Future.wait(
-          DB.allWallets.where((w) => w.network == network).map((e) => e.getLiquidWallet()),
-        ),
-        network: network,
-        apiConfig: Config.apiConfig,
-        jwtToken: token,
-        deviceId: await getDeviceId(),
-      );
-
-      if (fetchedSwaps.isNotEmpty) {
-        await Future.wait(fetchedSwaps.map((e) => e.save()));
-        await registerSwapWebhook(fetchedSwaps);
-
-        logD('Fetched ${fetchedSwaps.length} LNURL swaps!');
-        unawaited(upsertWallets(await getRecycledLNURLPool(network)));
-      }
-    } catch (e, s) {
-      logE(e, stackTrace: s);
-    }
-  }
-
-  // These are the trusted swaps
-  static Future<void> fetchCompletedLNURLSwaps({Network? network}) async {
-    final net = network ?? Config.network;
-    if (net == Network.regtest && !Config.isRegtestOn) return;
-
-    final wallets = DB.allWallets.where((w) => w.network == net && w.type == WalletType.full);
-    if (wallets.isEmpty) return;
-
-    final token = await JWTService.getToken(network: net);
-    if (token == null) return;
-
-    int savedSwapCount = 0;
-    try {
-      final trustedSwapIndexes = Map.fromEntries(
-        (await useSupabase(
-              (supabase) async => supabase
-                  .from('wallets')
-                  .select('uuid, trusted_swap_index')
-                  .inFilter('uuid', wallets.map((e) => e.uuid).toList()),
-              network: net,
-            ))?.map((e) => MapEntry(parseString(e['uuid']), parseIntN(e['trusted_swap_index']) ?? -2)) ??
-            <MapEntry<String, int>>[],
-      );
-      final initialSwapIndexes = Map.of(trustedSwapIndexes);
-
-      final res = await globalDio.get(
-        Config.of(net).getServerApiEndpoint('getCompletedLNURLSwaps'),
-        options: Options(headers: {'Authorization': 'Bearer $token'}),
-      );
-
-      if (res.isSuccess && res.data['lnurlSwaps'] is List) {
-        for (final row in res.data['lnurlSwaps']) {
-          try {
-            final swapId = parseStringN(row['swap_id']);
-            if (swapId == null || swapId.isEmpty) continue;
-            if (DB.swaps[swapId] != null) continue;
-
-            final wallet = wallets.where((w) => w.uuid == parseString(row['wallet_id'])).firstOrNull;
-            if (wallet == null) continue;
-            final swapIndex = (trustedSwapIndexes[wallet.uuid] ?? -1) - 1;
-            final claimData = row['claim_data'];
-
-            final invoice = parseStringN(row['invoice']);
-            if (invoice == null) continue;
-            DecodedInvoice? invoiceData;
-            try {
-              invoiceData = decodeBolt11Invoice(invoice: invoice);
-            } catch (_) {}
-
-            try {
-              invoiceData ??= decodeBolt12Invoice(invoice: invoice);
-            } catch (e) {
-              logE(e);
-            }
-            if (invoiceData == null) {
-              throw Exception('Missing invoice');
-            }
-
-            final sendAmount = (invoiceData.msats.i / 1000).toInt();
-            final onChainAmount = parseIntN(claimData?['onChainAmount']) ?? 0;
-            final claimFee = parseIntN(claimData?['claimFee']) ?? 0;
-            final boltzFee = parseIntN(claimData?['boltzFee']) ?? 0;
-            final receiveAmount = onChainAmount - claimFee;
-            final txId = parseString(row['claim_tx_id']);
-            final note = parseStringN(claimData?['note']);
-
-            await Swap(
-              id: swapId,
-              walletId: wallet.uuid,
-              walletType: wallet.type,
-              index: swapIndex,
-              network: net,
-              sendAmount: sendAmount.bigInt,
-              receiveAmount: receiveAmount.bigInt,
-              creationTime: parseDateTime(row['created_at']).millisecondsSinceEpoch.bigInt,
-              completionTime: parseDateTimeN(row['completed_at'])?.millisecondsSinceEpoch.bigInt,
-              boltzFee: boltzFee.bigInt,
-              claimFee: claimFee.bigInt,
-              lockupFee: (sendAmount - onChainAmount - boltzFee).bigInt,
-              swapStatus: parseString(row['status']),
-              note: note,
-              preimage: await PreImage.fromString(preimage: parseString(claimData?['preImage'])),
-              reverse: ReverseSwap(
-                to: Chain.liquid,
-                keys: KeyPair.fromPrivateKey(
-                  privateKey: U8Array32(parseString(claimData?['claimPrivateKey']).hexStringToBytes),
-                ),
-                swapCreateRes: ReverseResponse(
-                  invoice: invoice,
-                  swapTree: claimData?['swapTree'] is Map
-                      ? SwapTreeExtension.fromMap(claimData?['swapTree'])
-                      : SwapTreeExtension.fromMap(jsonDecode(parseString(claimData?['swapTree']))),
-                  lockupAddress: parseString(claimData?['lockupAddress']),
-                  refundPublicKey: parseString(claimData?['refundPublicKey']),
-                  timeoutBlockHeight: parseInt(claimData?['timeoutBlockHeight']),
-                  onchainAmount: onChainAmount.bigInt,
-                  blindingKey: parseString(claimData?['blindingKey']),
-                ),
-              ),
-              transactions: [
-                if (txId.isNotEmpty)
-                  SwapTransaction(txId: txId, chain: Chain.liquid, txType: SwapTransactionType.claim, isUser: true),
-              ],
-              isExchangeSwap: false,
-            ).save();
-
-            trustedSwapIndexes.update(wallet.uuid, (value) => value - 1, ifAbsent: () => -2);
-            savedSwapCount++;
-
-            if (note != null) {
-              await DB.transactions[IdWithWallet(walletId: wallet.uuid, id: txId)]?.update(
-                memo: note,
-                isMemoSynced: true,
-              );
-            }
-          } catch (e, s) {
-            logE(e, stackTrace: s);
-          }
-        }
-      }
-
-      if (savedSwapCount > 0) {
-        logD('[${net.name}] Fetched $savedSwapCount completed LNURL swaps!');
-
-        // update index in db to use later
-        final payload = Map.fromEntries(
-          trustedSwapIndexes.entries.where((e) => initialSwapIndexes[e.key] != e.value).map((e) {
-            final w = wallets.where((w) => w.uuid == e.key).firstOrNull;
-            if (w == null) return null;
-            return MapEntry(w, {'trusted_swap_index': e.value});
-          }).nonNulls,
-        );
-        if (payload.isNotEmpty) {
-          await upsertWallets(payload.cast<Wallet, Map<String, dynamic>>());
-        }
-        await pushCompletedSwaps();
-      }
-    } catch (e, s) {
-      logE(e, stackTrace: s);
-    }
   }
 }
 

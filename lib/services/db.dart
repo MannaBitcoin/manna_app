@@ -15,7 +15,6 @@ import 'package:manna/app_state.dart';
 import 'package:manna/config.dart';
 import 'package:manna/globals.dart';
 import 'package:manna/models/account.dart';
-import 'package:manna/models/bolt12_offer.dart';
 import 'package:manna/models/chat_message.dart';
 import 'package:manna/models/contact.dart';
 import 'package:manna/models/country_model.dart';
@@ -23,7 +22,6 @@ import 'package:manna/models/hive_adapters/v2.dart';
 import 'package:manna/models/misc.dart';
 import 'package:manna/models/setting_history_cache.dart';
 import 'package:manna/models/shop_item.dart';
-import 'package:manna/models/swap.dart';
 import 'package:manna/models/tax.dart';
 import 'package:manna/models/transaction.dart';
 import 'package:manna/models/wallet.dart';
@@ -33,7 +31,7 @@ import 'package:manna/services/log_service.dart';
 import 'package:manna/services/secure_storage.dart';
 import 'package:manna/utils/parser.dart';
 import 'package:manna/utils/toast_service.dart';
-import 'package:manna_core/manna_core.dart' show Swap, WalletType, Network;
+import 'package:manna_core/manna_core.dart' show WalletType, Network;
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 
@@ -99,24 +97,18 @@ class DB {
       .where(
         (e) =>
             !e.isDisabled &&
-            [
-              ...fullWallets.values,
-              ...woWallets.values,
-            ].where((w) => w.accountId == e.id && w.network == Config.network).isNotEmpty,
+            fullWallets.values.where((w) => w.accountId == e.id && w.network == Config.network).isNotEmpty,
       )
       .toList();
 
   // all the full wallets from all network
   static Map<String, Wallet> fullWallets = {};
-  // all the watch only wallets from all network
-  static Map<String, Wallet> woWallets = {};
-  static List<Wallet> get allWallets => [...fullWallets.values, ...woWallets.values];
+  static List<Wallet> get allWallets => [...fullWallets.values];
   // all the wallets for current network
   static List<Wallet> currentWallets = [];
 
   static Map<IdWithWallet, Transaction> allTransactions = {};
   static Map<IdWithWallet, Transaction> transactions = {};
-  static late BoxAccessor<String, Swap> swaps;
   static late BoxAccessor<int, Tax> taxes;
   static Map<int, ShopItem> shopItems = {};
   static late BoxAccessor<String, Uint8List> categoryImages;
@@ -124,7 +116,6 @@ class DB {
   static late BoxAccessor<int, SettingHistoryCache> settingHistory;
 
   static late Box<Wallet> walletBox;
-  static late Box<Wallet> woWalletBox;
   static late Box<Transaction> transactionBox;
   static late Box<Contact> contactsBox;
   static late Box<ShopItem> shopItemBox;
@@ -136,7 +127,6 @@ class DB {
   static late Box<double> btcPriceHistoryBox;
   static late Box generalBox;
   static late LazyBox<Uint8List> imageCacheBox;
-  static late BoxAccessor<String, Bolt12Offer> bolt12Offers;
 
   static bool isInitialized = false;
 
@@ -166,11 +156,6 @@ class DB {
 
       accounts = BoxAccessor(await Hive.openBox<Account>('accounts', encryptionCipher: HiveAesCipher(password)));
       walletBox = await Hive.openBox<Wallet>('wallets', encryptionCipher: HiveAesCipher(password));
-      woWalletBox = await Hive.openBox<Wallet>('woWallets', encryptionCipher: HiveAesCipher(password));
-      swaps = BoxAccessor(await Hive.openBox<Swap>('swaps', encryptionCipher: HiveAesCipher(password)));
-      bolt12Offers = BoxAccessor(
-        await Hive.openBox<Bolt12Offer>('bolt12Offers', encryptionCipher: HiveAesCipher(password)),
-      );
       contactsBox = await Hive.openBox<Contact>('contacts', encryptionCipher: HiveAesCipher(password));
       loadContacts();
 
@@ -223,10 +208,7 @@ class DB {
     // which takes significant time to decrypt and compact on next boot. compacting every few seconds solves it.
     await accounts.box.compact();
     await walletBox.compact();
-    await woWalletBox.compact();
     await transactionBox.compact();
-    await swaps.box.compact();
-    await bolt12Offers.box.compact();
     await shopItemBox.compact();
     await taxes.box.compact();
     await categoryImages.box.compact();
@@ -241,12 +223,8 @@ class DB {
 
   static void loadWallets() {
     fullWallets = {for (final w in walletBox.values) w.uuid: w};
-    woWallets = {for (final w in woWalletBox.values) w.uuid: w};
 
-    currentWallets = [
-      ...fullWallets.values.where((w) => w.network == Config.network),
-      ...woWallets.values.where((w) => w.network == Config.network),
-    ];
+    currentWallets = fullWallets.values.where((w) => w.network == Config.network).toList();
   }
 
   static void loadTransactions() {
@@ -323,17 +301,9 @@ class DB {
           ),
         );
         final walletData = utf8.encode(
-          jsonEncode(
-            await Future.wait(
-              fullWallets.values.map((v) async => {...v.toMap(), 'swapMnemonic': await v.getSwapMnemonic()}).toList(),
-            ),
-          ),
-        );
-        final woWalletData = utf8.encode(
-          jsonEncode(await Future.wait(woWallets.values.map((v) async => v.toMap()).toList())),
+          jsonEncode(await Future.wait(fullWallets.values.map((v) async => v.toMap()).toList())),
         );
         final transactionData = utf8.encode(jsonEncode(transactionBox.values.map((v) => v.toMap()).toList()));
-        final swapData = utf8.encode(jsonEncode(swaps.values.map((v) => v.toMap()).toList()));
         final shopItemData = utf8.encode(jsonEncode(shopItemBox.values.map((v) => v.toMap()).toList()));
         final taxesData = utf8.encode(jsonEncode(taxes.values.map((v) => v.toMap()).toList()));
         final catImageData = utf8.encode(
@@ -344,9 +314,7 @@ class DB {
 
         archive.add(ArchiveFile('accounts', accountData.length, accountData));
         archive.add(ArchiveFile('wallets', walletData.length, walletData));
-        archive.add(ArchiveFile('woWallets', woWalletData.length, woWalletData));
         archive.add(ArchiveFile('transactions', transactionData.length, transactionData));
-        archive.add(ArchiveFile('swaps', swapData.length, swapData));
         archive.add(ArchiveFile('shopItems', shopItemData.length, shopItemData));
         archive.add(ArchiveFile('taxes', taxesData.length, taxesData));
         archive.add(ArchiveFile('categoryImages', catImageData.length, catImageData));
@@ -430,25 +398,17 @@ class DB {
                               case 'wallets':
                                 await Future.wait(
                                   parseList(jsonData, (e) async {
-                                    final wallet = Wallet.fromMap(e);
-                                    await wallet.initSwapMnemonic(parseStringN(e['swapMnemonic']));
-                                    await wallet.save();
+                                    await Wallet.fromMap(e).save();
                                   }),
                                 );
                               case 'woWallets':
                                 await Future.wait(
                                   parseList(jsonData, (e) async {
-                                    final wallet = Wallet.fromMap(e);
-                                    await wallet.initSwapMnemonic(null);
-                                    await wallet.save();
+                                    await Wallet.fromMap(e).save();
                                   }),
                                 );
                               case 'transactions':
                                 await Future.wait(parseList(jsonData, (e) => Transaction.fromMap(e).save()));
-                              case 'swaps':
-                                await Future.wait(
-                                  parseList(jsonData, (e) async => (await SwapExtension.fromMap(e)).save()),
-                                );
                               case 'shopItems':
                                 await Future.wait(parseList(jsonData, (e) => ShopItem.fromMap(e).save()));
                               case 'taxes':

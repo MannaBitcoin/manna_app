@@ -11,7 +11,6 @@ import 'package:manna/router.dart';
 import 'package:manna/services/biometric_services.dart';
 import 'package:manna/services/db.dart';
 import 'package:manna/services/log_service.dart';
-import 'package:manna/services/wallet_service.dart';
 import 'package:manna/utils/parser.dart';
 import 'package:manna/utils/state_extension.dart';
 import 'package:manna/utils/toast_service.dart';
@@ -47,12 +46,6 @@ class ShopService {
               await Tax.fromMap(t).save();
             }
           }
-          if (data['wallet_descriptor'] is String) {
-            await WalletService.importWatchOnlyWallet(
-              accountName: 'Shop wallet',
-              walletDescriptor: parseString(data['wallet_descriptor']),
-            );
-          }
           final name = parseString(data['shopName']).trim();
           if (name.isNotEmpty) {
             shopName = name;
@@ -75,7 +68,6 @@ class ShopService {
       'category_images': DB.categoryImages.values.map((e) => base64Encode(e)).toList(),
       'isTipsEnabled': AppState.isShopTipsOn,
       'taxes': DB.taxes.values.map((e) => e.toMap()).toList(),
-      'wallet_descriptor': wallet.descriptor,
     };
   }
 

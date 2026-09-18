@@ -1,16 +1,29 @@
-import 'dart:convert';
-
+import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart'
+    show
+        PrepareSendPaymentRequest,
+        PaymentRequest,
+        FeePolicy,
+        SendPaymentMethod_Bolt11Invoice,
+        SendPaymentMethod_SparkInvoice,
+        SendPaymentMethod_BitcoinAddress,
+        OnchainConfirmationSpeed,
+        PrepareSendPaymentResponse,
+        SendPaymentMethod_SparkAddress,
+        SendPaymentMethod_CrossChainAddress,
+        SendOnchainFeeQuote,
+        InputType_LightningAddress,
+        PrepareLnurlPayRequest,
+        PrepareLnurlPayResponse,
+        LnurlPayRequestDetails;
 import 'package:intl/intl.dart';
 import 'package:manna/app_state.dart';
-import 'package:manna/config.dart';
-import 'package:manna/models/boltz_fees.dart';
-import 'package:manna/models/wallet.dart';
+import 'package:manna/models/misc.dart';
+import 'package:manna/models/wallet.dart' show Wallet;
 import 'package:manna/services/db.dart';
 import 'package:manna/services/db_service.dart';
-import 'package:manna/services/transaction_service.dart';
-import 'package:manna/services/wallet_service.dart';
-import 'package:manna/utils/parser.dart';
-import 'package:manna_core/manna_core.dart' hide Wallet;
+import 'package:manna/services/log_service.dart';
+import 'package:manna/utils/extensions.dart';
+import 'package:manna/utils/toast_service.dart';
 
 extension AmountExtension on num {
   double satsToFiat({DateTime? at, String? targetCurrencyCode}) {
@@ -91,326 +104,160 @@ double getBTCPriceAt({DateTime? at}) {
   return getClosestValue(DateTime.timestamp().millisecondsSinceEpoch ~/ 1000);
 }
 
-int getSwapNetworkFees(TraType type) => switch (type) {
-  TraType.lbtcToLbtcReceive || TraType.lbtcToLbtcSend => 0,
-  TraType.lbtcToLN => BoltzFees.getSubmarineFeesAndLimits().lbtcFees.minerFees,
-  TraType.lnToLbtc => () {
-    final fee = BoltzFees.getReverseFeesAndLimits();
-    return fee.lbtcFees.minerFees.claim + fee.lbtcFees.minerFees.lockup;
-  }(),
-  TraType.btcToLbtc => () {
-    final fee = BoltzFees.getChainFeesAndLimits();
-    return fee.lbtcFees.userClaim + fee.lbtcFees.server;
-  }(),
-  TraType.lbtcToBtc => () {
-    final fee = BoltzFees.getChainFeesAndLimits();
-    return fee.btcFees.userClaim + fee.btcFees.server;
-  }(),
-};
-
-double getBoltzPercentFee(TraType type) => switch (type) {
-  TraType.lbtcToLbtcSend || TraType.lbtcToLbtcReceive => 0,
-  TraType.lbtcToLN => BoltzFees.getSubmarineFeesAndLimits().btcFees.percentage,
-  TraType.lnToLbtc => BoltzFees.getReverseFeesAndLimits().lbtcFees.percentage,
-  TraType.btcToLbtc => BoltzFees.getChainFeesAndLimits().lbtcFees.percentage,
-  TraType.lbtcToBtc => BoltzFees.getChainFeesAndLimits().btcFees.percentage,
-};
-
-double? getMannaPercentFeeForSwap(TraType type, [DateTime? dt]) => switch (type) {
-  TraType.lbtcToLbtcSend || TraType.lbtcToLbtcReceive => 0,
-  TraType.lbtcToLN =>
-    dt != null ? parseDoubleN(DB.getSettingAtTime('app_lbtc_ln_swap_fee', dt)?.value) : DbService.lbtcLnSwapFee,
-  TraType.lnToLbtc =>
-    dt != null ? parseDoubleN(DB.getSettingAtTime('app_ln_lbtc_swap_fee', dt)?.value) : DbService.lnLbtcSwapFee,
-  TraType.btcToLbtc =>
-    dt != null ? parseDoubleN(DB.getSettingAtTime('app_btc_lbtc_swap_fee', dt)?.value) : DbService.btcLbtcSwapFee,
-  TraType.lbtcToBtc =>
-    dt != null ? parseDoubleN(DB.getSettingAtTime('app_lbtc_btc_swap_fee', dt)?.value) : DbService.lbtcBtcSwapFee,
-};
-
-// TODO remove in future
-int getTemporaryMannaFee(int amount, TraType type, [DateTime? dt]) {
-  final percent = dt != null
-      ? parseDoubleN(DB.getSettingAtTime('temp_swap_fee_percent', dt)?.value) ?? 0
-      : DbService.tempSwapFeePercent;
-  final threshold = dt != null
-      ? parseDoubleN(DB.getSettingAtTime('temp_swap_fee_threshold', dt)?.value) ?? 0
-      : DbService.tempSwapFeeThreshold;
-
-  final fee = amount >= threshold ? (amount * percent / 100) : 0.0;
-  if ({TraType.lbtcToBtc, TraType.lbtcToLN}.contains(type)) {
-    return fee.round();
-  }
-  return 0;
-}
-
 class FeesAndAmounts {
   FeesAndAmounts({
-    required this.liquidNetworkFee,
-    required this.boltzNetworkFee,
-    required this.boltzFee,
-    required this.mannaFee,
     required this.sendAmount,
     required this.receiveAmount,
-    required this.totalSpend,
+    required this.sparkFee,
+    required this.lightningFee,
+    required this.networkFee,
+    this.preparedPayment,
+    this.preparedLnurlPay,
+    this.onchainFeeQuote,
+    this.btcFeeRate = OnchainConfirmationSpeed.medium,
   });
 
-  final int liquidNetworkFee;
-  final int boltzNetworkFee;
-  final int boltzFee;
-  final int mannaFee;
   final int sendAmount;
   final int receiveAmount;
-  final int totalSpend;
+  final int sparkFee;
+  final int lightningFee;
+  final int networkFee;
 
-  FeesAndAmounts copyWith({int? liquidNetworkFee}) => FeesAndAmounts(
-    liquidNetworkFee: liquidNetworkFee ?? this.liquidNetworkFee,
-    boltzNetworkFee: boltzNetworkFee,
-    boltzFee: boltzFee,
-    mannaFee: mannaFee,
-    sendAmount: sendAmount,
-    receiveAmount: receiveAmount,
-    totalSpend: totalSpend,
-  );
+  final PrepareSendPaymentResponse? preparedPayment;
+  final PrepareLnurlPayResponse? preparedLnurlPay;
+  final SendOnchainFeeQuote? onchainFeeQuote;
+  final OnchainConfirmationSpeed btcFeeRate;
 
-  Map<String, int> toMap() => {
-    'liquidNetworkFee': liquidNetworkFee,
-    'boltzNetworkFee': boltzNetworkFee,
-    'boltzFee': boltzFee,
-    'mannaFee': mannaFee,
-    'sendAmount': sendAmount,
-    'receiveAmount': receiveAmount,
-    'totalSpend': totalSpend,
-  };
-
-  @override
-  String toString() => jsonEncode(toMap());
+  FeesAndAmounts copyWith({int? sendAmount, int? sparkFee, int? networkFee, OnchainConfirmationSpeed? btcFeeRate}) {
+    return FeesAndAmounts(
+      sendAmount: sendAmount ?? this.sendAmount,
+      receiveAmount: receiveAmount,
+      sparkFee: sparkFee ?? this.sparkFee,
+      lightningFee: lightningFee,
+      networkFee: networkFee ?? this.networkFee,
+      preparedPayment: preparedPayment,
+      onchainFeeQuote: onchainFeeQuote,
+      btcFeeRate: btcFeeRate ?? this.btcFeeRate,
+    );
+  }
 }
 
-int _getSwapSendAmount(int receiveAmount, TraType type, [DateTime? dt]) {
-  final fee = ((getMannaPercentFeeForSwap(type, dt) ?? 0) + getBoltzPercentFee(type)) / 100;
-  final networkFee = getSwapNetworkFees(type);
-  return type != TraType.lbtcToLN
-      ? ((receiveAmount + networkFee) / (1 - fee)).ceil()
-      : receiveAmount + (receiveAmount * fee).ceil() + networkFee;
-}
-
-// amount in sats
-int _getSwapReceiveAmount(int sendAmount, TraType type, [DateTime? dt]) {
-  final fee = ((getMannaPercentFeeForSwap(type, dt) ?? 0) + getBoltzPercentFee(type)) / 100;
-  final networkFee = getSwapNetworkFees(type);
-  return type != TraType.lbtcToLN
-      ? (sendAmount - (sendAmount * fee).ceil() - networkFee)
-      : ((sendAmount - networkFee) / (1 + fee)).floor();
-}
-
-Future<FeesAndAmounts> calculateFeeAndAmounts({
+(int, LnurlPayRequestDetails, FeePolicy, String?, PrepareLnurlPayResponse)? lnurlCache;
+Future<FeesAndAmounts?> calculateFeeAndAmounts({
   required Wallet wallet,
+  required AddressData addressData,
   required int amount,
-  required TraType type,
-  bool isSendAll = false,
-  bool isAmountTarget = true,
-  DateTime? dateTime,
-  String? address,
+  bool amountExcludesFee = true,
+  OnchainConfirmationSpeed? alreadySelectedSpeed,
 }) async {
-  if (amount <= 0) {
-    return FeesAndAmounts(
-      liquidNetworkFee: 0,
-      boltzNetworkFee: 0,
-      boltzFee: 0,
-      mannaFee: 0,
-      receiveAmount: 0,
-      sendAmount: 0,
-      totalSpend: 0,
-    );
+  if (wallet.balance < amount) {
+    ToastService.show('Insufficient balance!');
+    return null;
   }
-  if (type == TraType.lbtcToLbtcReceive) {
-    return FeesAndAmounts(
-      liquidNetworkFee: 0,
-      boltzNetworkFee: 0,
-      boltzFee: 0,
-      mannaFee: 0,
-      receiveAmount: amount,
-      sendAmount: amount,
-      totalSpend: amount,
-    );
-  } else if (type == TraType.lbtcToLbtcSend) {
-    final mannaPercentFee =
-        parseDoubleN(DB.getSettingAtTime('liquid_fee_percent', dateTime ?? DateTime.now())?.value) ??
-        DbService.liquidFeePercent;
-    final mannaFeeThreshold =
-        parseIntN(DB.getSettingAtTime('liquid_fee_threshold', dateTime ?? DateTime.now())?.value) ??
-        DbService.liquidFeeThreshold;
+  if (amount <= 0) return null;
 
-    final mannaFee = !isSendAll && amount >= mannaFeeThreshold ? (amount * mannaPercentFee / 100).round() : 0;
-
-    final networkFee = await getLiquidNetworkFeeEstimate(
-      walletId: wallet.uuid,
-      amount: amount,
-      isSendAll: isSendAll,
-      isSwapLockUp: false,
-      address: address,
-    );
-    if (networkFee == null) {
-      return FeesAndAmounts(
-        liquidNetworkFee: 0,
-        boltzNetworkFee: 0,
-        boltzFee: 0,
-        mannaFee: 0,
-        sendAmount: 0,
-        receiveAmount: 0,
-        totalSpend: 0,
-      );
-    }
-
-    return FeesAndAmounts(
-      liquidNetworkFee: networkFee,
-      boltzNetworkFee: 0,
-      boltzFee: 0,
-      mannaFee: mannaFee,
-      sendAmount: isSendAll ? wallet.balance - networkFee : amount,
-      receiveAmount: isSendAll ? wallet.balance - networkFee : amount,
-      totalSpend: isSendAll ? wallet.balance : amount + mannaFee + networkFee,
-    );
-  }
-
-  // sending
-  if ({TraType.lbtcToBtc, TraType.lbtcToLN}.contains(type)) {
-    final networkFee = await getLiquidNetworkFeeEstimate(
-      walletId: wallet.uuid,
-      amount: amount,
-      isSendAll: isSendAll,
-      isSwapLockUp: true,
-      address: address,
-    );
-    if (networkFee == null) {
-      return FeesAndAmounts(
-        liquidNetworkFee: 0,
-        boltzNetworkFee: 0,
-        boltzFee: 0,
-        mannaFee: 0,
-        sendAmount: 0,
-        receiveAmount: 0,
-        totalSpend: 0,
-      );
-    }
-    final mannaPercent = getMannaPercentFeeForSwap(type, dateTime ?? DateTime.now()) ?? 0;
-    final boltzPercent = getBoltzPercentFee(type);
-    final boltzNetworkFee = getSwapNetworkFees(type);
-
-    final swapSendAmount = isSendAll
-        ? wallet.balance - networkFee
-        : isAmountTarget
-        ? _getSwapSendAmount(amount, type, dateTime)
-        : amount;
-
-    final swapReceiveAmount = _getSwapReceiveAmount(swapSendAmount, type, dateTime);
-    final totalFees = swapSendAmount - swapReceiveAmount - boltzNetworkFee;
-    final x = totalFees / (boltzPercent + mannaPercent);
-    final boltzFee = (x * boltzPercent).round();
-    final mannaFee = totalFees - boltzFee;
-
-    // TODO remove in future
-    final tempMannaFee = getTemporaryMannaFee(swapSendAmount, type);
-
-    return FeesAndAmounts(
-      liquidNetworkFee: networkFee,
-      boltzNetworkFee: boltzNetworkFee,
-      boltzFee: boltzFee,
-      mannaFee: mannaFee < tempMannaFee ? tempMannaFee : mannaFee,
-      sendAmount: swapSendAmount,
-      receiveAmount: swapReceiveAmount,
-      totalSpend: swapSendAmount + networkFee + (mannaFee < tempMannaFee ? tempMannaFee : 0),
-    );
-  } else {
-    final mannaPercent = getMannaPercentFeeForSwap(type, dateTime ?? DateTime.now()) ?? 0;
-    final boltzPercent = getBoltzPercentFee(type);
-    final boltzNetworkFee = getSwapNetworkFees(type);
-
-    final swapReceiveAmount = isAmountTarget ? amount : _getSwapReceiveAmount(amount, type, dateTime);
-    final swapSendAmount = _getSwapSendAmount(swapReceiveAmount, type, dateTime);
-    final totalFees = swapSendAmount - swapReceiveAmount - boltzNetworkFee;
-    final x = totalFees / (boltzPercent + mannaPercent);
-    final boltzFee = (x * boltzPercent).round();
-
-    return FeesAndAmounts(
-      liquidNetworkFee: 0,
-      boltzNetworkFee: boltzNetworkFee,
-      boltzFee: boltzFee,
-      mannaFee: totalFees - boltzFee,
-      sendAmount: swapSendAmount,
-      receiveAmount: swapReceiveAmount,
-      totalSpend: swapSendAmount,
-    );
-  }
-}
-
-int getMannaFees({
-  required int receiveAmount,
-  required TraType type,
-  required bool isSendAll,
-  int? sendAmount,
-  DateTime? dateTime,
-}) {
-  if (receiveAmount <= 0) return 0;
-  if (type == TraType.lbtcToLbtcReceive) {
-    return 0;
-  } else if (type == TraType.lbtcToLbtcSend) {
-    final mannaPercentFee =
-        parseDoubleN(DB.getSettingAtTime('liquid_fee_percent', dateTime ?? DateTime.now())?.value) ??
-        DbService.liquidFeePercent;
-    final mannaFeeThreshold =
-        parseIntN(DB.getSettingAtTime('liquid_fee_threshold', dateTime ?? DateTime.now())?.value) ??
-        DbService.liquidFeeThreshold;
-
-    return !isSendAll && receiveAmount >= mannaFeeThreshold ? (receiveAmount * mannaPercentFee / 100).round() : 0;
-  }
-  final mannaPercent = getMannaPercentFeeForSwap(type, dateTime ?? DateTime.now()) ?? 0;
-  final boltzPercent = getBoltzPercentFee(type);
-  final boltzNetworkFee = getSwapNetworkFees(type);
-
-  final swapReceiveAmount = receiveAmount;
-  final swapSendAmount = sendAmount ?? _getSwapSendAmount(swapReceiveAmount, type, dateTime);
-  final totalFees = swapSendAmount - swapReceiveAmount - boltzNetworkFee;
-  final x = totalFees / (boltzPercent + mannaPercent);
-  final boltzFee = (x * boltzPercent).ceil();
-
-  return totalFees - boltzFee;
-}
-
-Future<int?> getLiquidNetworkFeeEstimate({
-  required String walletId,
-  required int amount,
-  required bool isSendAll,
-  required bool isSwapLockUp,
-  String? address,
-}) async {
   try {
-    bool isAddressLiquid = false;
-    if (address != null) {
-      try {
-        await Address.validate(addressString: address);
-        isAddressLiquid = true;
-      } catch (_) {}
-    }
+    if (wallet.spark != null) {
+      if (addressData.data case InputType_LightningAddress(:final field0)) {
+        final feePolicy = amountExcludesFee ? FeePolicy.feesExcluded : FeePolicy.feesIncluded;
 
-    final data = await WalletService.buildTx(
-      walletId: walletId,
-      outAddress: isAddressLiquid
-          ? address!
-          : switch (Config.network) {
-              Network.mainnet =>
-                'lq1pqw4ttv27z6fwwthfkrjk77lw5eph2092ggwp97ndrckyggre7vr2hx900ypc586yjwecnlgfnprlrcftmak02p50jtdwv0760dq5az9n4azcvmt92jr6',
-              Network.testnet => '',
-              Network.regtest =>
-                'el1pqv80lfr7lze26cgsxxj3gvulgwtyfscptnrtqg2gm6lqrle7ddkgy45gegdz4ce3l2r55sktptc5hj38yl0e9zem3tjkmxac05dnuh0emje2m2naqlut',
-            },
-      outAmount: amount,
-      drain: isSendAll,
-      isSwapLockup: isSwapLockUp,
-      showError: false,
-    );
-    return data.$2?.fees.first.value.toInt();
-  } catch (_) {}
+        PrepareLnurlPayResponse? lnurlRes;
+        if (lnurlCache != null &&
+            lnurlCache!.$1 == amount &&
+            lnurlCache!.$2 == field0.payRequest &&
+            lnurlCache!.$3 == feePolicy &&
+            lnurlCache!.$4 == addressData.comment) {
+          lnurlRes = lnurlCache!.$5;
+        } else {
+          lnurlRes = await wallet.spark!.prepareLnurlPay(
+            request: PrepareLnurlPayRequest(
+              amount: amount.bigInt,
+              payRequest: field0.payRequest,
+              feePolicy: feePolicy,
+              comment: addressData.comment,
+              validateSuccessActionUrl: true,
+            ),
+          );
+          lnurlCache = (amount, field0.payRequest, feePolicy, addressData.comment, lnurlRes);
+        }
+
+        final lightningFee = lnurlRes.feeSats.i;
+        final sendAmount = amountExcludesFee ? lnurlRes.amountSats.i + lightningFee : lnurlRes.amountSats.i;
+        return FeesAndAmounts(
+          sendAmount: sendAmount,
+          receiveAmount: sendAmount - lightningFee,
+          sparkFee: 0,
+          lightningFee: lightningFee,
+          networkFee: 0,
+          preparedLnurlPay: lnurlRes,
+        );
+      }
+
+      final res = await wallet.spark!.prepareSendPayment(
+        request: PrepareSendPaymentRequest(
+          paymentRequest: PaymentRequest.input(input: addressData.address),
+          amount: amount.bigInt,
+          feePolicy: amountExcludesFee ? FeePolicy.feesExcluded : FeePolicy.feesIncluded,
+        ),
+      );
+      switch (res.paymentMethod) {
+        case SendPaymentMethod_Bolt11Invoice(:final sparkTransferFeeSats, :final lightningFeeSats):
+          final sparkFee = sparkTransferFeeSats?.i ?? 0;
+          final lightningFee = lightningFeeSats.i;
+          final totalFee = sparkFee + lightningFee;
+          final sendAmount = amountExcludesFee ? res.amount.i + totalFee : res.amount.i;
+
+          return FeesAndAmounts(
+            sendAmount: sendAmount,
+            receiveAmount: sendAmount - totalFee,
+            sparkFee: sparkFee,
+            lightningFee: lightningFeeSats.i,
+            networkFee: 0,
+            preparedPayment: res,
+          );
+
+        case SendPaymentMethod_SparkInvoice(:final fee, :final tokenIdentifier):
+        case SendPaymentMethod_SparkAddress(:final fee, :final tokenIdentifier):
+          if (tokenIdentifier == null) {
+            final sendAmount = amountExcludesFee ? res.amount.i + fee.i : res.amount.i;
+            return FeesAndAmounts(
+              sendAmount: sendAmount,
+              receiveAmount: sendAmount - fee.i,
+              sparkFee: fee.i,
+              lightningFee: 0,
+              networkFee: 0,
+              preparedPayment: res,
+            );
+          }
+
+        case SendPaymentMethod_BitcoinAddress(:final feeQuote):
+          final btcFeeRate = alreadySelectedSpeed ?? OnchainConfirmationSpeed.medium;
+          final (sparkFee, networkFee) = switch (btcFeeRate) {
+            OnchainConfirmationSpeed.fast => (feeQuote.speedFast.userFeeSat.i, feeQuote.speedFast.l1BroadcastFeeSat.i),
+            OnchainConfirmationSpeed.medium => (
+              feeQuote.speedMedium.userFeeSat.i,
+              feeQuote.speedMedium.l1BroadcastFeeSat.i,
+            ),
+            OnchainConfirmationSpeed.slow => (feeQuote.speedSlow.userFeeSat.i, feeQuote.speedSlow.l1BroadcastFeeSat.i),
+          };
+          final sendAmount = amountExcludesFee ? res.amount.i + sparkFee + networkFee : res.amount.i;
+          return FeesAndAmounts(
+            sendAmount: sendAmount,
+            receiveAmount: sendAmount - sparkFee - networkFee,
+            sparkFee: sparkFee,
+            lightningFee: 0,
+            networkFee: networkFee,
+            preparedPayment: res,
+            onchainFeeQuote: feeQuote,
+            btcFeeRate: btcFeeRate,
+          );
+
+        case SendPaymentMethod_CrossChainAddress():
+      }
+    }
+  } catch (e, s) {
+    logE(e, stackTrace: s);
+  }
+
   return null;
 }

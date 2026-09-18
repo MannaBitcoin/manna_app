@@ -3,10 +3,11 @@ enum AddressType {
   bolt11Invoice,
   lnurl,
   bolt12Offer,
-  liquid,
   bolt12Invoice,
-  // silentPayment
+  silentPayment,
   unknown,
+  spark,
+  sparkInvoice,
 }
 
 enum SwapType { submarine, reverse, chain }

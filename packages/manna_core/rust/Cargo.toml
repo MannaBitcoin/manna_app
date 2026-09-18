@@ -10,24 +10,25 @@ name = "manna_core"
 crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
-flutter_rust_bridge = "=2.12.0"
+flutter_rust_bridge = "=2.11.1"
 
-lwk_wollet = { version = "0.18.1", default-features = false, features = ["elements_rpc", "electrum"] }
-lwk_signer = { version = "0.18.1", default-features = false }
-lwk_common = { version = "0.18.1", default-features = false }
-boltz-client = { path = "packages/boltz-client-0.3.1", default-features = false, features = ["lnurl", "electrum"] }
+lwk_wollet = { version = "0.19.0", default-features = false, features = ["elements_rpc", "electrum"] }
+lwk_signer = { version = "0.19.0", default-features = false }
+lwk_common = { version = "0.19.0", default-features = false }
 
 serde = { version = "1.0.219", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0", default-features = false, features = ["std", "preserve_order"] }
-dashmap = { version = "6.1.0" }
 
 # utils
 lightning = { version = "0.2.4", default-features = false, features = ["std"] }
+hex = "0.4.3"
+lightning-invoice = "0.34.1"
 bip353-rs = { version = "0.1" }
-hex = { version = "0.4", default-features = false, features = ["std"] }
 fs2 = { version = "0.4.3" }
+lnurl-rs = "0.10.0"
+url = "2.5.8"
+bitcoin = "0.32.102"
 
-once_cell = { version = "1.19", default-features = false, features = ["std"] }
 bip39 = { version = "2.2.2", default-features = false, features = ["std"] }
 bip32 = { version = "0.5.3", default-features = false, features = ["std", "secp256k1"] }
 hkdf = { version = "0.13" }
@@ -49,14 +50,11 @@ openssl = { version = "0.10.73", features = ["vendored"] }
 # For NSE
 uniffi = { version = "0.32.0", features = ["cli"] }
 ureq = { version = "3.1.4", features = ["json"] }
-base64 = { version = "0.22" }
+base64 = { version = "0.23.1" }
 thiserror = { version = "2.0.17" }
 regex = { version = "1.12.2" }
 uuid = { version = "1.19.0", features = ["v5"] }
 tokio = "1.49.0"
-chrono = "0.4.43"
-chacha20 = "0.9.0"
-poly1305 = "0.8.0"
 
 [profile.release]
 strip = true

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart' show PaymentType, PaymentStatus;
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -247,8 +248,8 @@ class ChatController {
       useSafeArea: true,
       isDismissible: false,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      routeSettings: const RouteSettings(name: 'RequestBottomSheet'),
-      builder: (context) => RequestBottomSheet(initialData: data),
+      routeSettings: const RouteSettings(name: 'PaymentRequestBottomSheet'),
+      builder: (context) => PaymentRequestBottomSheet(initialData: data),
     );
     if (res is PayReqMessageData && context.mounted) {
       // check if recipient is reachable
@@ -808,7 +809,7 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     final message = widget.message ?? widget.controller!.messages[widget.index!];
 
     if (message is TxMessage) {
-      final isSent = !message.tx.isIncoming;
+      final isSent = message.tx.inner.paymentType == PaymentType.send;
       final tx = message.tx;
       messageWidget = Align(
         alignment: isSent ? Alignment.centerRight : Alignment.centerLeft,
@@ -830,9 +831,9 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       AmountText(
-                        amountSat: tx.amount.abs(),
+                        amountSat: tx.inner.amount.i.abs(),
                         showFiat: true,
-                        atTime: tx.txTimestamp,
+                        atTime: tx.timestamp,
                         btcStyle: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                         fiatStyle: TextStyle(
                           fontSize: 14,
@@ -842,11 +843,11 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        '${!tx.isCompleted
-                            ? 'Pending'
-                            : isSent
-                            ? 'Sent'
-                            : 'Received'}${tx.note.trim().isNotEmpty ? ' : ${tx.note.trim()}' : ''}',
+                        '${switch (tx.inner.status) {
+                          PaymentStatus.completed => isSent ? 'Sent' : 'Received',
+                          PaymentStatus.pending => 'Pending',
+                          PaymentStatus.failed => 'Failed',
+                        }}${tx.note.trim().isNotEmpty ? ' : ${tx.note.trim()}' : ''}',
                         style: TextStyle(
                           fontSize: 12,
                           color: context.themedColor(bright: Colors.black54, dark: Colors.white54),
@@ -861,7 +862,11 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
                         spacing: 6,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.check_circle, color: tx.isCompleted ? Colors.green : Colors.grey, size: 16),
+                          Icon(
+                            Icons.check_circle,
+                            color: tx.inner.status == PaymentStatus.completed ? Colors.green : Colors.grey,
+                            size: 16,
+                          ),
                           Expanded(
                             child: Text(
                               DateFormat('h:mm a').format(message.timestamp),

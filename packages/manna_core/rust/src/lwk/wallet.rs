@@ -1,15 +1,16 @@
 use super::error::LwkError;
 use super::types::{Address, Balance, Balances, DecodedPset, Fee, Tx};
-use crate::util::{LockedFileStore, Network};
+use crate::types::Network;
+use crate::util::LockedFileStore;
 use flutter_rust_bridge::frb;
 use lwk_common::Signer;
 use lwk_signer::SwSigner;
 use lwk_wollet::elements::hex::ToHex;
-use lwk_wollet::elements::{Address as LwkAddress, pset::PartiallySignedTransaction};
-use lwk_wollet::hashes::{Hash, sha256};
+use lwk_wollet::elements::{pset::PartiallySignedTransaction, Address as LwkAddress};
+use lwk_wollet::hashes::{sha256, Hash};
 use lwk_wollet::{
-    AddressResult, ElectrumClient, Network as ElementsNetwork, Wollet, WolletBuilder,
-    WolletDescriptor, full_scan_with_electrum_client,
+    full_scan_with_electrum_client, AddressResult, ElectrumClient, Network as ElementsNetwork, Wollet,
+    WolletBuilder, WolletDescriptor,
 };
 use std::convert::TryFrom;
 use std::path::PathBuf;
@@ -139,7 +140,7 @@ impl Wallet {
                     value: converted_value,
                 }),
                 Err(_) => {
-                    eprintln!("Warning: Overflow encountered converting {} to i64", value);
+                    eprintln!("Warning: Overflow encountered converting u64 to i64");
                     None
                 }
             })
@@ -180,7 +181,7 @@ impl Wallet {
             let address = LwkAddress::from_str(out_address)?;
             let pset = tx_builder
                 .drain_lbtc_wallet()
-                .drain_lbtc_to(address)
+                .drain_lbtc_to(&address)?
                 .enable_ct_discount()
                 .fee_rate(Some(fee_rate))
                 .finish()?;
@@ -208,8 +209,7 @@ impl Wallet {
 
         let pset_details = self.get_wallet()?.get_details(&pset)?;
         let balances: Balances = pset_details
-            .balance
-            .balances
+            .balances()
             .iter()
             .map(|(&asset_id, &value)| Balance {
                 asset_id: asset_id.to_string(),
@@ -242,8 +242,7 @@ impl Wallet {
             discounted_vsize: tx.discount_vsize(),
             discounted_weight: tx.discount_weight(),
             fees: pset_details
-                .balance
-                .fees
+                .fees()
                 .iter()
                 .map(|(&asset_id, &value)| Fee {
                     asset_id: asset_id.to_string(),

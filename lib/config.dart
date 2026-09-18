@@ -16,14 +16,16 @@ class Config {
     return Network.mainnet;
   }
 
+  static late final String breezApiKey;
+
   static late final ApiConfig apiConfig;
   static late final Duration liquidSyncInterval;
   static late final bool isRegtestOn;
 
-  static late final bool isBolt12ReceiveEnabled;
   static late final bool isBolt12SendEnabled;
 
   static void init(Env env) {
+    breezApiKey = env.breezApiKey;
     apiConfig = ApiConfig(
       mainnet: NetworkConfig(
         bitcoin: NetworkEndpoints(esplora: env.bitcoinEsploraUrlMainnet, electrum: env.bitcoinElectrumUrlMainnet),
@@ -78,7 +80,6 @@ class Config {
         regtest.bitcoin.electrum.isNotEmpty &&
         regtest.liquid.esplora.isNotEmpty &&
         regtest.liquid.electrum.isNotEmpty;
-    isBolt12ReceiveEnabled = env.enableBolt12Receive;
     isBolt12SendEnabled = env.enableBolt12Send;
   }
 
@@ -96,9 +97,9 @@ class Config {
     Network.regtest => '5ac9f65c0efcc4775e0baec4ec03abdde22473cd3cf33c0419ca290e0751b225',
   };
 
-  static String? get boltzSwapWebhookUrl {
+  static String? get sparkWebhookUrl {
     final config = Config.current;
-    return config.serverUrl.isNotEmpty ? config.getServerApiEndpoint('webhook/mobile/swap') : null;
+    return config.serverUrl.isNotEmpty ? config.getServerApiEndpoint('webhook/spark') : null;
   }
 }
 

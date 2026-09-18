@@ -9,8 +9,6 @@ import 'package:intl/intl.dart';
 import 'package:manna/app_state.dart';
 import 'package:manna/config.dart';
 import 'package:manna/models/account.dart';
-import 'package:manna/router.dart';
-import 'package:manna/screens/buy_bitcoin_screen.dart';
 import 'package:manna/services/audio_service.dart';
 import 'package:manna/services/connectivity_checker.dart';
 import 'package:manna/services/db_service.dart';
@@ -526,8 +524,8 @@ class _TradeScreenState extends State<TradeScreen> {
                       child: ElevatedButton(
                         onPressed: () async {
                           if (Config.network != Network.testnet) {
-                            await AppRouter.push(const BuyBitcoinScreen());
-                            update();
+                            // await AppRouter.push(const BuyBitcoinScreen());
+                            // update();
                           }
                         },
                         style: ElevatedButton.styleFrom(

@@ -139,7 +139,6 @@ class Account {
   Future<void> delete() async {
     await SecureStorage.delete('acc-$id', useSecureEnclave: true);
     await DB.walletBox.deleteAll(DB.fullWallets.values.where((w) => w.accountId == id).map((e) => e.uuid));
-    await DB.woWalletBox.deleteAll(DB.woWallets.values.where((w) => w.accountId == id).map((e) => e.uuid));
     await DB.accounts.box.delete(id);
   }
 

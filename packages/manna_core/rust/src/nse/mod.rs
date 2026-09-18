@@ -1,15 +1,11 @@
-mod boltz;
 mod chat;
 mod receive_tx;
 mod util;
 
-use crate::boltz::error::BoltzError;
-use crate::nse::boltz::{
-    fetch_and_store_lnurl_swaps, handle_bolt12_invoice_request, handle_swap_processing,
-};
 use crate::nse::chat::handle_chat_notification;
 use crate::nse::receive_tx::handle_receive_tx_notification;
-use crate::util::{MannaError, Network};
+use crate::types::Network;
+use crate::util::MannaError;
 use serde::Deserialize;
 use serde_json::Value;
 use std::error::Error;
@@ -53,12 +49,6 @@ pub enum NSEError {
     LWK(String),
     #[error("Manna error: {0}")]
     Manna(String),
-}
-
-impl From<BoltzError> for NSEError {
-    fn from(value: BoltzError) -> Self {
-        NSEError::Manna(value.message)
-    }
 }
 
 impl From<MannaError> for NSEError {
@@ -121,24 +111,6 @@ pub fn handle_notification(
                 app_group_dir_path,
                 enc_key,
             )?]);
-        } else if msg_type == "swap_webhook" {
-            return handle_swap_processing(&network, app_group_dir_path, enc_key, jwt_tokens);
-        } else if msg_type == "lnurl" {
-            fetch_and_store_lnurl_swaps(
-                &network,
-                app_group_dir_path.clone(),
-                enc_key,
-                jwt_tokens.clone(),
-            )?;
-            return handle_swap_processing(&network, app_group_dir_path, enc_key, jwt_tokens);
-        } else if msg_type == "bolt12" {
-            return handle_bolt12_invoice_request(
-                &network,
-                notification_data,
-                app_group_dir_path,
-                enc_key,
-                jwt_tokens,
-            );
         }
     }
 

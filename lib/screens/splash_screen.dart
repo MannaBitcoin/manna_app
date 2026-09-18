@@ -7,14 +7,12 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:intl/intl.dart';
 import 'package:manna/app_state.dart';
 import 'package:manna/globals.dart';
-import 'package:manna/models/account.dart';
 import 'package:manna/router.dart';
 import 'package:manna/screens/data_recovery_screen.dart';
 import 'package:manna/screens/setup_wallet_screen.dart';
 import 'package:manna/screens/shop_screen.dart';
 import 'package:manna/screens/wallet_screen.dart';
 import 'package:manna/services/biometric_services.dart';
-import 'package:manna/services/boltz_service.dart';
 import 'package:manna/services/chat_service.dart';
 import 'package:manna/services/db.dart';
 import 'package:manna/services/db_service.dart';
@@ -88,8 +86,7 @@ class SplashScreenState extends State<SplashScreen> with TickerProviderStateMixi
         if (DB.activeAccounts.isEmpty) {
           AppRouter.replaceAll(const SetupWalletScreen());
         } else {
-          if (await WalletService.initAllWallets() && DB.activeAccounts.every((e) => !selectedWallet.isCorrupted)) {
-            unawaited(BoltzService.init());
+          if (await WalletService.initAllWallets()) {
             AppRouter.replaceAll(const WalletScreen());
             if (AppState.openShopOnBoot) {
               unawaited(AppRouter.push(const ShopScreen()));

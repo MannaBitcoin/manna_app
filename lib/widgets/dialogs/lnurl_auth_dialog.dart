@@ -17,9 +17,12 @@ enum LNURLAuthAction {
 }
 
 class LNURLAuthDialog extends StatefulWidget {
-  const LNURLAuthDialog({required this.uri, super.key});
+  const LNURLAuthDialog({required this.uri, required this.service, required this.k1, this.action, super.key});
 
   final Uri uri;
+  final String service;
+  final String k1;
+  final String? action;
 
   @override
   State<LNURLAuthDialog> createState() => _LNURLAuthDialogState();
@@ -45,11 +48,8 @@ class _LNURLAuthDialogState extends State<LNURLAuthDialog> {
   @override
   Widget build(BuildContext context) {
     final action =
-        LNURLAuthAction.values
-            .where((e) => e.name == widget.uri.queryParameters['action']?.toLowerCase())
-            .firstOrNull ??
+        LNURLAuthAction.values.where((e) => e.name == widget.action?.toLowerCase()).firstOrNull ??
         LNURLAuthAction.login;
-    final service = widget.uri.host;
 
     return AlertDialog(
       title: const Text('LNURL-Auth'),
@@ -60,7 +60,7 @@ class _LNURLAuthDialogState extends State<LNURLAuthDialog> {
             TextSpan(
               children: [
                 TextSpan(
-                  text: service,
+                  text: widget.service,
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: AppColors.primaryColor),
                 ),
                 TextSpan(text: ' ${action.message}'),
@@ -106,7 +106,14 @@ class _LNURLAuthDialogState extends State<LNURLAuthDialog> {
       actions: [
         TextButton(onPressed: () => AppRouter.pop(false), child: const Text('Cancel')),
         TextButton(
-          onPressed: selectedAcc == null ? null : () => LnurlAuthService.onLNURLAuth(selectedAcc!, widget.uri),
+          onPressed: selectedAcc == null
+              ? null
+              : () => LnurlAuthService.onLNURLAuth(
+                  account: selectedAcc!,
+                  service: widget.service,
+                  k1Hex: widget.k1,
+                  uri: widget.uri,
+                ),
           child: Text(switch (action) {
             LNURLAuthAction.register => 'Register',
             LNURLAuthAction.auth || LNURLAuthAction.login => 'Login',

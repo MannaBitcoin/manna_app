@@ -1,10 +1,13 @@
 use crate::nse::receive_tx::WalletFile;
 use crate::nse::util::{decrypt_file, encrypt_and_save_file};
 use crate::nse::{NSEError, NotificationInfo};
-use crate::util::{Crypto, Network, WalletType};
-use base64::{Engine, prelude::BASE64_STANDARD};
+use crate::types::{Network, WalletType};
+use crate::util::Crypto;
+use base64::{prelude::BASE64_STANDARD, Engine};
+use bitcoin::hex::FromHex;
+use lwk_wollet::elements::hex::ToHex;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::str::FromStr;
 use tracing::instrument;
@@ -37,7 +40,6 @@ impl ContactFile {
                 let uuid = row.get(0)?.as_str()?.to_string();
                 let wallet_id = row.get(1)?.as_str()?.to_string();
                 let wallet_type = match row.get(2)?.as_u64()? {
-                    1 => WalletType::WatchOnly,
                     _ => WalletType::Full,
                 };
                 let name = row.get(3)?.as_str()?.to_string();
@@ -69,7 +71,6 @@ impl ContactFile {
             Value::Number(
                 match contact.wallet_type {
                     WalletType::Full => 0,
-                    WalletType::WatchOnly => 1,
                 }
                 .into(),
             ),
@@ -160,7 +161,7 @@ pub(crate) fn handle_chat_notification(
             .to_string()
     };
 
-    let message_hex = hex::decode(
+    let message_hex = Vec::from_hex(
         message_hex_str
             .strip_prefix("\\x")
             .unwrap_or(&*message_hex_str),
@@ -268,7 +269,7 @@ pub(crate) fn handle_chat_notification(
     let received_receipt_bytes =
         Crypto::encrypt_chat_message(receiver_privkey, sender_pubkey, message_id.to_string())
             .map_err(|e| NSEError::MessageDecryptionFailed(format!("{:?} : {}", e.kind, e.msg)))?;
-    let received_receipt_hex = hex::encode(received_receipt_bytes);
+    let received_receipt_hex = received_receipt_bytes.to_hex();
     let uuid_namespace = Uuid::from_str("7d09e47f-b6b2-4e8c-8b8b-42769a3885b7")
         .map_err(|_| NSEError::Manna("Failed to parse UUID".to_string()))?;
     let uuid = Uuid::new_v5(&uuid_namespace, format!("{message_id}received").as_bytes());

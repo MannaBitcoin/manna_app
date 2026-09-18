@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:action_slider/action_slider.dart';
+import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart'
+    show SendPaymentRequest, SendPaymentOptions, SendPaymentMethod_BitcoinAddress, Payment, LnurlPayRequest;
 import 'package:flutter/material.dart';
-import 'package:manna/models/enums.dart';
+import 'package:manna/config.dart';
 import 'package:manna/models/misc.dart';
-import 'package:manna/models/swap.dart';
+import 'package:manna/models/transaction.dart';
 import 'package:manna/router.dart';
 import 'package:manna/screens/contact_screen.dart';
 import 'package:manna/screens/send_screen.dart';
@@ -12,11 +16,8 @@ import 'package:manna/services/audio_service.dart';
 import 'package:manna/services/biometric_services.dart';
 import 'package:manna/services/db.dart';
 import 'package:manna/services/db_service.dart';
-import 'package:manna/services/transaction_service.dart';
-import 'package:manna/services/wallet_service.dart';
 import 'package:manna/theme.dart';
 import 'package:manna/utils/extensions.dart';
-import 'package:manna/utils/parser.dart';
 import 'package:manna/utils/sats_extension.dart';
 import 'package:manna/utils/state_extension.dart';
 import 'package:manna/widgets/amount_text.dart';
@@ -32,25 +33,8 @@ class ConfirmPaymentBottomSheet extends StatefulWidget {
 
 class _ConfirmPaymentBottomSheetState extends State<ConfirmPaymentBottomSheet> {
   late PayOutData paymentData = widget.paymentData;
-  double? feeRate;
-  bool showFeeRateField = false;
-  bool isBuildingTx = false;
-  final feeRateController = TextEditingController();
   bool showFiat = false;
   late bool isPrivate = paymentData.account.isSendAnonymously;
-  late bool shouldSendNotification = paymentData.account.isSendNotification;
-
-  @override
-  void initState() {
-    buildTx();
-    super.initState();
-  }
-
-  @override
-  void dispose() {
-    feeRateController.dispose();
-    super.dispose();
-  }
 
   String amountFormatter(int amount) => showFiat ? amount.satsToFiat().formatFiat() : getSatInBitcoinStyle(amount);
 
@@ -67,7 +51,7 @@ class _ConfirmPaymentBottomSheetState extends State<ConfirmPaymentBottomSheet> {
           ),
           const SizedBox(height: 16),
           AmountText(
-            amountSat: paymentData.calculation.totalSpend,
+            amountSat: paymentData.calculation.sendAmount,
             btcStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 30),
             isTapDisable: false,
             onUpdate: (val) => update(() => showFiat = !val),
@@ -108,53 +92,21 @@ class _ConfirmPaymentBottomSheetState extends State<ConfirmPaymentBottomSheet> {
                     buildInfoRow('Wallet Name', paymentData.account.name),
                     buildInfoRow('Actual Amount', amountFormatter(paymentData.calculation.receiveAmount)),
 
-                    if (paymentData.calculation.mannaFee > 0)
-                      buildInfoRow('Manna Fee', amountFormatter(paymentData.calculation.mannaFee)),
-                    if (paymentData.calculation.boltzFee > 0)
-                      buildInfoRow('Boltz Fee', amountFormatter(paymentData.calculation.boltzFee)),
-                    if (paymentData.calculation.boltzNetworkFee > 0)
-                      buildInfoRow('Boltz Network Fee', amountFormatter(paymentData.calculation.boltzNetworkFee)),
-
-                    if (paymentData.calculation.liquidNetworkFee > 0)
-                      buildInfoRow('Network Fee', amountFormatter(paymentData.calculation.liquidNetworkFee)),
+                    if (paymentData.calculation.sparkFee > 0)
+                      buildInfoRow('Spark Fee', amountFormatter(paymentData.calculation.sparkFee)),
+                    if (paymentData.calculation.lightningFee > 0)
+                      buildInfoRow('Lightning Fee', amountFormatter(paymentData.calculation.lightningFee)),
+                    if (paymentData.calculation.networkFee > 0)
+                      buildInfoRow('Network Fee', amountFormatter(paymentData.calculation.networkFee)),
 
                     const Divider(height: 16),
-                    buildInfoRow('Total Amount', amountFormatter(paymentData.calculation.totalSpend)),
+                    buildInfoRow('Total Amount', amountFormatter(paymentData.calculation.sendAmount)),
                   ],
                 ),
               ),
-              if (isBuildingTx) const CircularProgressIndicator(),
             ],
           ),
           const SizedBox(height: 16),
-          if (showFeeRateField)
-            Row(
-              children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: feeRateController,
-                    decoration: const InputDecoration(labelText: 'Fee Rate (sats/vB)'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: () async {
-                    feeRate = parseDoubleN(feeRateController.text.trim());
-                    if (feeRate != null) {
-                      await buildTx();
-                    }
-                  },
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: AppColors.primaryColor.withValues(alpha: 0.7),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    padding: const EdgeInsets.all(16),
-                    child: const Icon(Icons.check, color: Colors.white),
-                  ),
-                ),
-              ],
-            ),
           if (paymentData.userEnteredAddress.isMannaUserName) ...[
             CheckboxListTile(
               value: isPrivate,
@@ -182,15 +134,6 @@ class _ConfirmPaymentBottomSheetState extends State<ConfirmPaymentBottomSheet> {
                 icon: const Icon(Icons.info),
               ),
             ),
-            if (!isPrivate)
-              CheckboxListTile(
-                value: shouldSendNotification,
-                onChanged: (value) => update(() => shouldSendNotification = value ?? false),
-                title: const Text('Notify Receiver', style: TextStyle(fontWeight: FontWeight.w500)),
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-                subtitle: const Text('Receiver will be notified about the payment.'),
-              ),
           ],
           const SizedBox(height: 24),
           ActionSlider.standard(
@@ -201,43 +144,82 @@ class _ConfirmPaymentBottomSheetState extends State<ConfirmPaymentBottomSheet> {
             successIcon: const Icon(Icons.check, color: Colors.white),
             child: const Text('Swipe to Pay', style: TextStyle(fontSize: 16)),
             action: (controller) async {
+              final wallet = paymentData.account.currentWallet;
+              final spark = wallet.spark;
+              if (spark == null) return;
+
               controller.loading();
+
               if (await BiometricService.authenticateBiometricsIfExists(message: 'Authenticate to confirm payment!')) {
                 await hapticFeedback();
-                final (status, txId) = await TransactionService.payLbtc(
-                  paymentData: paymentData,
-                  notifyReceiver: shouldSendNotification,
-                  isPrivate: isPrivate,
-                  feeRate: feeRate,
-                );
-                if (status == 1) {
-                  await hapticFeedback();
-                  controller.success();
-                  Future.delayed(const Duration(seconds: 1), () {
-                    AppRouter.replaceAll(const WalletScreen());
-                    if (txId != null) {
-                      AppRouter.push(
-                        TransactionDetailScreen(
-                          id: IdWithWallet(walletId: paymentData.account.currentWallet.uuid, id: txId),
-                          fromCompletedTx: true,
-                          submarineSwapId: paymentData.swap?.swapType == SwapType.submarine
-                              ? paymentData.swap?.id
-                              : null,
-                        ),
-                      );
-                    }
-                  });
-                } else {
-                  if (status == 3) {
-                    feeRate = DbService.estimatedLiquidFeesPPM * 1.2;
-                    feeRateController.text = feeRate.toString();
-                    await buildTx();
-                  } else if (status == 4) {
-                    showFeeRateField = true;
-                    update();
-                  }
-                  controller.reset();
+
+                Payment? payment;
+                if (paymentData.calculation.preparedLnurlPay != null) {
+                  payment = (await spark.lnurlPay(
+                    request: LnurlPayRequest(prepareResponse: paymentData.calculation.preparedLnurlPay!),
+                  )).payment;
                 }
+
+                if (paymentData.calculation.preparedPayment != null) {
+                  payment = (await spark.sendPayment(
+                    request: SendPaymentRequest(
+                      prepareResponse: paymentData.calculation.preparedPayment!,
+                      options: switch (paymentData.calculation.preparedPayment!.paymentMethod) {
+                        SendPaymentMethod_BitcoinAddress() => SendPaymentOptions.bitcoinAddress(
+                          confirmationSpeed: paymentData.calculation.btcFeeRate,
+                        ),
+                        _ => null,
+                      },
+                    ),
+                  )).payment;
+                }
+
+                if (payment == null) {
+                  controller.reset();
+                  return;
+                }
+                await hapticFeedback();
+                controller.success();
+
+                await Transaction(
+                  txId: payment.id,
+                  inner: payment,
+                  network: Config.network,
+                  walletId: wallet.uuid,
+                  memo: paymentData.addressData.comment ?? '',
+                  note: paymentData.note ?? '',
+                  categories: paymentData.category ?? {},
+                  senderUUID: wallet.uuid,
+                  receiverUserNameOrUUID: paymentData.userEnteredAddress.isUserName
+                      ? paymentData.userEnteredAddress
+                      : paymentData.receiverDetail?.uuid,
+                  extraMetadata: {if (paymentData.brantaData != null) 'brantaData': paymentData.brantaData!.toMap()},
+                ).save();
+                await paymentData.receiverDetail?.save();
+                unawaited(DbService.cacheContacts());
+
+                if (!isPrivate &&
+                    paymentData.receiverDetail != null &&
+                    (paymentData.addressData.comment?.trim().isNotEmpty ?? false)) {
+                  unawaited(
+                    DbService.saveTxData(
+                      senderUUID: wallet.uuid,
+                      receiverLnurl: paymentData.receiverDetail!.lnurl(),
+                      txId: payment.id,
+                      memo: paymentData.addressData.comment!,
+                    ),
+                  );
+                }
+
+                Future.delayed(const Duration(seconds: 1), () {
+                  AppRouter.replaceAll(const WalletScreen());
+                  AppRouter.push(
+                    TransactionDetailScreen(
+                      id: IdWithWallet(walletId: wallet.uuid, id: payment!.id),
+                      fromCompletedTx: true,
+                    ),
+                  );
+                });
               } else {
                 controller.reset();
               }
@@ -260,23 +242,5 @@ class _ConfirmPaymentBottomSheetState extends State<ConfirmPaymentBottomSheet> {
         ],
       ),
     );
-  }
-
-  Future<void> buildTx() async {
-    update(() => isBuildingTx = true);
-    final wallet = paymentData.account.currentWallet;
-    final data = await WalletService.buildTx(
-      walletId: wallet.uuid,
-      outAddress: paymentData.liquidLockupAddress,
-      outAmount: paymentData.calculation.sendAmount,
-      fees: feeRate,
-      drain: paymentData.sendAll ?? false,
-      isSwapLockup: paymentData.swap != null,
-    );
-
-    paymentData = paymentData.copyWith(
-      calculation: paymentData.calculation.copyWith(liquidNetworkFee: data.$2?.fees.first.value.toInt() ?? 0),
-    );
-    update(() => isBuildingTx = false);
   }
 }

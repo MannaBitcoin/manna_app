@@ -1,10 +1,8 @@
 import 'dart:async';
 
 import 'package:app_links/app_links.dart';
-import 'package:manna/config.dart';
 import 'package:manna/router.dart';
 import 'package:manna/screens/send_screen.dart';
-import 'package:manna/services/lnurl_service.dart';
 
 import 'db.dart';
 
@@ -29,7 +27,8 @@ class DeepLinkService {
   static Future<bool> processUri(Uri uri) async {
     if ({'lightning', 'lnurlw', 'lnurlp', 'keyauth'}.contains(uri.scheme)) {
       try {
-        await handleLNURL(rawAddress: uri.toString(), network: Config.network);
+        // TODO implement
+        // await handleLNURL(rawAddress: uri.toString(), network: Config.network);
         return true;
       } catch (_) {}
     }

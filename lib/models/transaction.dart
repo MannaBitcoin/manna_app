@@ -1,12 +1,9 @@
-import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 
+import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart'
+    show Payment, serializePaymentToJson, deserializePaymentFromJson;
 import 'package:manna/config.dart';
-import 'package:manna/models/swap.dart';
-import 'package:manna/services/transaction_service.dart';
 import 'package:manna/utils/extensions.dart';
-import 'package:manna/utils/sats_extension.dart';
 import 'package:manna_core/manna_core.dart' hide Wallet;
 import 'misc.dart';
 import 'package:manna/services/db.dart';
@@ -17,12 +14,9 @@ class Transaction {
     required this.txId,
     required this.network,
     required this.walletId,
-    required this.amount,
-    required this.timestamp,
-    required this.isIncoming,
+    required this.inner,
     this.memo = '',
     this.note = '',
-    this.liquidTx,
     this.isMemoSynced = false,
     this.senderUUID,
     this.receiverUserNameOrUUID,
@@ -38,9 +32,7 @@ class Transaction {
       txId: parseString(map['txId']),
       network: Network.values[parseIntN(map['network']) ?? 0],
       walletId: parseString(map['walletId']),
-      amount: parseInt(map['amount']),
-      timestamp: parseDateTime(map['timestamp']),
-      isIncoming: parseBool(map['isIncoming']),
+      inner: deserializePaymentFromJson(jsonStr: map['inner']),
       memo: parseString(map['memo']),
       note: parseString(map['note']),
       isMemoSynced: parseBool(map['isNoteSynced']),
@@ -54,12 +46,9 @@ class Transaction {
   final String txId;
   final Network network;
   final String walletId;
-  int amount;
-  final DateTime timestamp;
-  final bool isIncoming;
+  Payment inner;
   String memo;
   String note;
-  Tx? liquidTx;
   bool isMemoSynced;
   String? senderUUID;
   String? receiverUserNameOrUUID;
@@ -67,21 +56,23 @@ class Transaction {
 
   Map<String, dynamic> extraMetadata = {};
 
+  IdWithWallet get metaId => IdWithWallet(walletId: walletId, id: txId);
+
+  DateTime get timestamp => DateTime.fromMillisecondsSinceEpoch(inner.timestamp.i * 1000);
+
   Future<void> update({
-    int? amount,
+    Payment? inner,
     String? memo,
     String? note,
-    Nullable<Tx?>? liquidTx,
     bool? isMemoSynced,
     Nullable<String?>? senderUUID,
     Nullable<String?>? receiverUserNameOrUUID,
     Set<String>? categories,
     Map<String, dynamic>? extraMetadata,
   }) {
-    this.amount = amount ?? this.amount;
+    this.inner = inner ?? this.inner;
     this.memo = memo ?? this.memo;
     this.note = note ?? this.note;
-    this.liquidTx = liquidTx != null ? liquidTx.value : this.liquidTx;
     this.isMemoSynced = isMemoSynced ?? this.isMemoSynced;
     this.senderUUID = senderUUID != null ? senderUUID.value : this.senderUUID;
     this.receiverUserNameOrUUID = receiverUserNameOrUUID != null
@@ -91,8 +82,6 @@ class Transaction {
     this.extraMetadata = extraMetadata ?? this.extraMetadata;
     return save();
   }
-
-  IdWithWallet get metaId => IdWithWallet(walletId: walletId, id: txId);
 
   Future<void> save() async {
     final id = metaId;
@@ -110,40 +99,13 @@ class Transaction {
     if (network == Config.network) DB.transactions.remove(metaId);
   }
 
-  DateTime? get confirmationTimestamp =>
-      liquidTx?.height != null ? DateTime.fromMillisecondsSinceEpoch((liquidTx?.timestamp ?? 0) * 1000) : null;
-
-  DateTime get txTimestamp => confirmationTimestamp ?? timestamp; // i am out of idea for the name of this getter
-
-  Swap? get linkedSwap => DB.swaps.values.where((s) => s.transactions.map((e) => e.txId).contains(txId)).firstOrNull;
-
-  bool get isCompleted => (linkedSwap?.isClosed ?? true) && liquidTx?.height != null;
-
-  int mannaFees() {
-    final swap = linkedSwap;
-    final traType = swap?.getTransactionType ?? (isIncoming ? TraType.lbtcToLbtcReceive : TraType.lbtcToLbtcSend);
-
-    return max(
-      getTemporaryMannaFee((swap?.sendAmount.i ?? amount.abs()) - (liquidTx?.fee.i ?? 0), traType, txTimestamp),
-      getMannaFees(
-        receiveAmount: swap?.receiveAmount.i ?? (amount.abs() - (liquidTx?.fee.i ?? 0)),
-        isSendAll: liquidTx?.outputs.isEmpty ?? false,
-        type: traType,
-        dateTime: txTimestamp,
-      ),
-    );
-  }
-
   Map<String, dynamic> toMap() => {
     'txId': txId,
     'network': network.index,
     'walletId': walletId,
-    'amount': amount,
-    'timestamp': timestamp,
-    'isIncoming': isIncoming,
+    'inner': serializePaymentToJson(payment: inner),
     'memo': memo,
     'note': note,
-    'liquidTx': liquidTx?.toJsonString(),
     'isNoteSynced': isMemoSynced,
     'senderUUID': senderUUID,
     'receiverUserNameOrUUID': receiverUserNameOrUUID,

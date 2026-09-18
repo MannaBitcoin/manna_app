@@ -53,13 +53,6 @@ class _ShopSettingScreenState extends State<ShopSettingScreen> {
               ),
             ),
             SwitchListTile(
-              title: const Text('Payer pays fee'),
-              subtitle: const Text('You will receive full amount, but payer has to pay higher than bill amount'),
-              value: AppState.payerPayShopFee,
-              secondary: const Icon(Icons.toll),
-              onChanged: (bool value) => update(() => AppState.payerPayShopFee = value),
-            ),
-            SwitchListTile(
               title: const Text('Enable Tips'),
               value: AppState.isShopTipsOn,
               secondary: const Icon(Icons.attach_money_outlined),

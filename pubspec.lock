@@ -161,16 +161,8 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "4.4.1"
-  battery_optimization_helper:
-    dependency: "direct main"
-    description:
-      name: battery_optimization_helper
-      sha256: "4defadec8fd40911d35e9d4add6302e5101a1a2c833ab1fb62973c7657b32e5e"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.2.0"
   bech32:
-    dependency: "direct main"
+    dependency: transitive
     description:
       name: bech32
       sha256: "156cbace936f7720c79a79d16a03efad343b1ef17106716e04b8b8e39f99f7f7"
@@ -201,6 +193,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.2.0"
+  breez_sdk_spark_flutter:
+    dependency: "direct main"
+    description:
+      path: "packages/breez-sdk-spark-flutter"
+      relative: true
+    source: path
+    version: "0.25.0"
   build:
     dependency: transitive
     description:
@@ -926,10 +925,10 @@ packages:
     dependency: transitive
     description:
       name: flutter_rust_bridge
-      sha256: e87d6b9ee934dcd24a128ccb2bd91905d2d5fe5c06245d6a8f5477d4907a437a
+      sha256: "37ef40bc6f863652e865f0b2563ea07f0d3c58d8efad803cc01933a4b2ee067e"
       url: "https://pub.dev"
     source: hosted
-    version: "2.12.0"
+    version: "2.11.1"
   flutter_secure_dotenv:
     dependency: "direct main"
     description:
@@ -971,6 +970,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "9.1.0"
+  freezed_annotation:
+    dependency: transitive
+    description:
+      name: freezed_annotation
+      sha256: "7294967ff0a6d98638e7acb774aac3af2550777accd8149c90af5b014e6d44d8"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.1.0"
   functions_client:
     dependency: transitive
     description:
@@ -1043,6 +1050,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.15.6"
+  html_rich_text:
+    dependency: "direct main"
+    description:
+      name: html_rich_text
+      sha256: "77eda176ee2bda0d9e59e2c3d1e0866e64fb21dae50d10c78e3a9009dee5da14"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.2.0"
   http:
     dependency: "direct main"
     description:

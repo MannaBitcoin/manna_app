@@ -13,6 +13,9 @@ dependencies:
   manna_core:
     path: ./packages/manna_core
 
+  breez_sdk_spark_flutter:
+    path: ./packages/breez-sdk-spark-flutter
+
   mobile_scanner: ^7.2.0
   path: ^1.9.1
   path_provider: ^2.1.6
@@ -57,7 +60,6 @@ dependencies:
     path: packages/nostr
   uuid: ^4.5.3
   cached_network_image: ^3.4.1
-  bech32: ^0.2.2
   convert: ^3.1.2
   scidart: ^0.0.2-dev.12
   maplibre_gl: ^0.24.0
@@ -79,11 +81,11 @@ dependencies:
   nfc_manager_ndef: ^1.1.0
   app_settings: ^7.0.0
   wakelock_plus: ^1.6.1
-  battery_optimization_helper: ^0.2.0
   flutter_image_compress: ^2.4.0
   build_info: ^2.0.0
   branta: ^3.2.0
   flutter_secure_dotenv: ^2.0.0
+  html_rich_text: ^1.2.0
 
 
 dependency_overrides:

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui';
 
+import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart' show BreezSdkSparkLib, initLogging;
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
@@ -18,7 +19,6 @@ import 'package:manna/globals.dart';
 import 'package:manna/router.dart';
 import 'package:manna/screens/menu_screen.dart';
 import 'package:manna/screens/splash_screen.dart';
-import 'package:manna/services/boltz_service.dart';
 import 'package:manna/services/chat_service.dart';
 import 'package:manna/services/connectivity_checker.dart';
 import 'package:manna/services/db.dart';
@@ -32,7 +32,6 @@ import 'package:manna/theme.dart';
 import 'package:manna/utils/constants.dart';
 import 'package:manna/utils/state_extension.dart';
 import 'package:manna/utils/util.dart';
-import 'package:manna/widgets/bottom sheets/receiving_tx_bottom_sheet.dart';
 import 'package:manna/widgets/bottom%20sheets/new_tx_notifier_bottom_sheet.dart';
 import 'package:manna/widgets/restore_progress_bar.dart';
 import 'package:manna/widgets/shimmer.dart';
@@ -48,6 +47,7 @@ void main() async {
   Config.init(Env.create());
 
   await LibMannaCore.init();
+  await BreezSdkSparkLib.init();
 
   // Logging setup
   unawaited(
@@ -74,6 +74,26 @@ void main() async {
     filter: ProductionFilter()..level = Level.all,
     output: MultiOutput([?fileOutput, if (kDebugMode) ConsoleOutput()]),
   );
+
+  try {
+    final output = FileLogOutput(dirPath: (await LogManager.getLogDirectory()).path, fileName: 'breez.jsonl');
+    await output.init();
+
+    final levelMap = Map.fromEntries(Level.values.map((e) => MapEntry(e.name.toUpperCase(), e)));
+    initLogging().listen(
+      (event) => output.output(
+        OutputEvent(
+          LogEvent(levelMap[event.level] ?? Level.trace, event.line, time: DateTime.now()),
+          event.line.split('\n'),
+        ),
+      ),
+      onError: (e, s) {
+        logE(e, stackTrace: s);
+      },
+    );
+  } catch (e, s) {
+    logE(e, stackTrace: s);
+  }
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   if (!kDebugMode) {
@@ -171,7 +191,6 @@ class MannaAppState extends State<MannaApp> with WidgetsBindingObserver {
             }
 
             await JWTService.getToken();
-            await BoltzService.processPendingSwaps(lnurlSwapIdsToProcess: []);
 
             DbService.startBtcPriceListening();
             await ChatService.startListener();
@@ -182,14 +201,6 @@ class MannaAppState extends State<MannaApp> with WidgetsBindingObserver {
       },
       onStateChange: (value) {
         isVisible.value = (value == AppLifecycleState.resumed);
-      },
-    );
-    GlobalListener.addListener(
-      stream: .receivingTx,
-      listenerName: 'main',
-      callback: (data) {
-        if (mounted) setState(() {});
-        return true;
       },
     );
     GlobalListener.addListener(
@@ -207,7 +218,6 @@ class MannaAppState extends State<MannaApp> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
 
-    GlobalListener.removeListener(stream: .receivingTx, listenerName: 'main');
     GlobalListener.removeListener(stream: .receivedTx, listenerName: 'main');
     listener?.dispose();
     connectivitySub?.cancel();
@@ -248,7 +258,7 @@ class MannaAppState extends State<MannaApp> with WidgetsBindingObserver {
                   final widget = SafeArea(
                     top: false,
                     child: Scaffold(
-                      bottomSheet: newReceivedTxBottomSheet(context) ?? receivingTxBottomSheet(context),
+                      bottomSheet: newReceivedTxBottomSheet(context),
                       body: Stack(
                         children: [
                           Column(

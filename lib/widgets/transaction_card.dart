@@ -1,3 +1,4 @@
+import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart' show PaymentType, PaymentStatus;
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:manna/models/contact.dart';
@@ -8,6 +9,7 @@ import 'package:manna/screens/transaction_detail_screen.dart';
 import 'package:manna/services/db.dart';
 import 'package:manna/theme.dart';
 import 'package:manna/utils/constants.dart';
+import 'package:manna/utils/date_extension.dart';
 import 'package:manna/utils/extensions.dart';
 import 'package:manna/widgets/amount_text.dart';
 import 'package:manna/widgets/shimmer.dart';
@@ -41,7 +43,7 @@ class TransactionCard extends StatelessWidget {
     );
     // if (exchangeOrder == null) {
     for (final wallet in wallets) {
-      if (tx.isIncoming) {
+      if (tx.inner.paymentType == PaymentType.receive) {
         if (tx.senderUUID != null) {
           contact ??= DB.contacts[IdWithWalletAndType.wallet(id: tx.senderUUID!, wallet: wallet)];
         }
@@ -68,9 +70,9 @@ class TransactionCard extends StatelessWidget {
     // final isCompleted = exchangeOrder != null ? exchangeOrder?.swap?.completionTime != null : tx.isCompleted;
     // final timestamp = exchangeOrder?.createdAt ?? tx.txTimestamp;
 
-    final isIncoming = tx.isIncoming;
-    final isCompleted = tx.isCompleted;
-    final timestamp = tx.txTimestamp;
+    final isIncoming = tx.inner.paymentType == PaymentType.receive;
+    final isCompleted = tx.inner.status == PaymentStatus.completed;
+    final timestamp = tx.timestamp;
 
     return GestureDetector(
       onTap: () => AppRouter.push(
@@ -154,18 +156,19 @@ class TransactionCard extends StatelessWidget {
                         ),
                       ],
                     ),
+                    if (contact?.name() != null)
+                      Text(
+                        // exchangeOrder?.partner.name.capitalize ??
+                        contact?.name() ?? 'Unknown',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.left,
+                        style: const TextStyle(color: AppColors.accentColor, fontWeight: FontWeight.w600),
+                      ),
                     Text(
-                      // exchangeOrder?.partner.name.capitalize ??
-                      contact?.name() ??
-                          tx.liquidTx?.outputs.firstOrNull?.address.standard.shortenAddress() ??
-                          'Unknown',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.left,
-                      style: const TextStyle(color: AppColors.accentColor, fontWeight: FontWeight.w600),
-                    ),
-                    Text(
-                      RelativeTime(context).format(timestamp),
+                      timestamp.isBefore(DateTime.now().subtract(const Duration(hours: 24)))
+                          ? timestamp.format()
+                          : RelativeTime(context).format(timestamp),
                       style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                       textAlign: TextAlign.right,
                     ),
@@ -186,7 +189,7 @@ class TransactionCard extends StatelessWidget {
                   : AmountText(
                       amountSat:
                           // exchangeOrder?.cryptoAmount ??
-                          tx.amount,
+                          tx.inner.amount.i,
                       btcStyle: const TextStyle(fontSize: 20),
                       showFiat: true,
                       isIncoming: isIncoming,

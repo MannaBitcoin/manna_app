@@ -41,6 +41,7 @@ class AppImages {
 class AppLottie {
   static const success = 'assets/lottie/success.json';
   static const pending = 'assets/lottie/pending.json';
+  static const failed = 'assets/lottie/failed.json';
   static const swipeRight = 'assets/lottie/swipe right.json';
 }
 

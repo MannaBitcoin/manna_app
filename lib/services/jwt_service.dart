@@ -134,16 +134,11 @@ class JWTService {
     if (now >= exp || (exp - now) <= tokenExpirySkew.inSeconds) return false;
 
     final tokenUuids = jwt.payload['wallet_uuids'];
-    final tokenWoUuids = jwt.payload['watch_only_wallet_uuids'];
-    if (tokenUuids == null || tokenUuids is! List || tokenWoUuids == null || tokenWoUuids is! List) return false;
+    if (tokenUuids == null || tokenUuids is! List) return false;
 
     final fullUUIDs = wallets.where((w) => w.type == WalletType.full).map((e) => e.uuid).toSet();
-    final woUUIDs = wallets.where((w) => w.type == WalletType.watchOnly).map((e) => e.uuid).toSet();
 
     if (!setEquals(tokenUuids.map((e) => parseString(e)).toSet(), fullUUIDs)) {
-      return false;
-    }
-    if (!setEquals(tokenWoUuids.map((e) => parseString(e)).toSet(), woUUIDs)) {
       return false;
     }
     return true;
@@ -155,10 +150,7 @@ class JWTService {
     List<JWTRequest>? reqList,
   }) async {
     final payload = {
-      if (wallets.isNotEmpty)
-        'wallets': wallets
-            .map((e) => {'xpub': e.xpub, 'type': e.type == WalletType.watchOnly ? 'wo' : 'full'})
-            .toList(),
+      if (wallets.isNotEmpty) 'wallets': wallets.map((e) => {'xpub': e.xpub, 'type': 'full'}).toList(),
       'challenges': ?reqList?.map((e) => e.toMap()).toList(),
       'device_id': await getDeviceId(),
     };

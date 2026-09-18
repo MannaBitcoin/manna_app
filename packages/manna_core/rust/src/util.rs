@@ -1,46 +1,46 @@
-use crate::boltz::error::BoltzError;
-use crate::boltz::types::PreImage;
-use crate::lwk::wallet::Wallet;
+use crate::types::{DecodedBolt12Offer, DecodedInvoice, Network};
 use aes_gcm::aead::Payload;
 use aes_gcm::{
-    AeadCore, Aes256Gcm, KeyInit, Nonce,
-    aead::{Aead, rand_core::RngCore},
-    aes::cipher::InvalidLength,
+    aead::{rand_core::RngCore, Aead}, aes::cipher::InvalidLength, AeadCore, Aes256Gcm,
+    KeyInit,
+    Nonce,
 };
 use aes_kw::Kek;
 use bip32::{
-    DerivationPath, ExtendedKey, Prefix, PublicKey, XPrv, XPub,
-    secp256k1::sha2::{Digest, Sha256},
+    secp256k1::sha2::{Digest, Sha256}, DerivationPath, ExtendedKey, Prefix, XPrv,
+    XPub,
 };
-use bip39::rand::thread_rng;
-use bip39::{Error as MnemonicError, Language, Mnemonic};
-use boltz_client::bitcoin::hashes::{Hash, hash160};
-use boltz_client::bitcoin::secp256k1::{Message, SecretKey};
-use boltz_client::elements::AddressParams;
-use boltz_client::swaps::magic_routing::sign_address;
-use boltz_client::util::secrets::{Preimage, SwapMasterKey};
-use boltz_client::{Keypair, Secp256k1, ToHex};
+use bip353::{Bip353Resolver, PaymentType, ResolverConfig};
+use bip39::{rand::thread_rng, Error as MnemonicError, Language, Mnemonic};
+use bitcoin::bech32::{Bech32m, Hrp};
+use bitcoin::secp256k1::PublicKey;
+use bitcoin::{
+    bech32,
+    constants::ChainHash,
+    hashes::{hash160, Hash},
+    secp256k1::{Message, SecretKey},
+};
 use flutter_rust_bridge::frb;
 use fs2::FileExt;
 use hkdf::Hkdf;
-use lightning::bitcoin::base64::DecodeError;
-use lightning::util::ser::Writeable;
+use lightning::offers::{
+    invoice::Bolt12Invoice,
+    offer::{Amount, Offer},
+};
+use lightning::types::string::PrintableString;
+use lightning_invoice::Bolt11Invoice;
 use lwk_common::{FileStore, Store};
-use lwk_wollet::elements::Address as LwkAddress;
+use lwk_wollet::elements::hex::ToHex;
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::fs::File;
-use std::path::PathBuf;
-use std::str::FromStr;
-use std::sync::{Mutex, OnceLock};
+use std::{
+    fs,
+    fs::File,
+    path::PathBuf,
+    str::FromStr,
+    sync::{Mutex, OnceLock},
+    time::Duration,
+};
 use x25519_dalek::{PublicKey as XPublicKey, StaticSecret};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
-pub enum Network {
-    Mainnet,
-    Testnet,
-    Regtest,
-}
 
 #[derive(Debug)]
 pub struct MannaError {
@@ -101,35 +101,7 @@ pub fn get_minimal_runtime() -> &'static tokio::runtime::Runtime {
     })
 }
 
-/// function to validate btc address according to network
-pub fn validate_btc_address(address: &str, network: Network) -> Result<bool, MannaError> {
-    let address = boltz_client::bitcoin::address::Address::from_str(address)
-        .map_err(|_| MannaError::new("Failed to parse bitcoin address".to_string()))?;
-    Ok(address.is_valid_for_network(match network {
-        Network::Mainnet => boltz_client::bitcoin::Network::Bitcoin,
-        Network::Testnet => boltz_client::bitcoin::Network::Testnet,
-        Network::Regtest => boltz_client::bitcoin::Network::Regtest,
-    }))
-}
-
-pub(crate) fn ensure_http_prefix(url: &str) -> String {
-    let protocols = ["http://", "https://"];
-    for protocol in protocols.iter() {
-        if url.starts_with(protocol) {
-            return url.to_string();
-        }
-    }
-    format!("https://{url}")
-}
-
-/// get current time in milliseconds since epoch
-pub(crate) fn get_current_time() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("time should go forward")
-        .as_millis()
-}
-
+#[frb(unignore)]
 pub struct Mnemonics {
     pub sentence: String,
     pub entropy: Vec<u8>,
@@ -265,63 +237,12 @@ impl BIP32 {
     }
 }
 
-pub struct AddressEntry {
-    pub index: u64,
-    pub address: String,
-    pub signature: String,
-}
-
-pub struct LnurlPoolEntry {
-    pub index: u64,
-    pub address: Option<AddressEntry>,
-    pub preimage: PreImage,
-    pub claim_key: KeyPair,
-}
-
-// this is used by all modules so its here and not in boltz/types
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KeyPair {
     pub secret_key: Vec<u8>,
     pub public_key: Vec<u8>,
 }
 
-impl KeyPair {
-    #[frb(sync)]
-    pub fn from_private_key(private_key: [u8; 32]) -> Result<Self, BoltzError> {
-        let secp = Secp256k1::new();
-        let secret_key = SecretKey::from_slice(&private_key)
-            .map_err(|e| BoltzError::new("Key".to_string(), e.to_string()))?;
-        Ok(Keypair::from_secret_key(&secp, &secret_key).into())
-    }
-}
-
-impl TryInto<Keypair> for KeyPair {
-    type Error = BoltzError;
-
-    fn try_into(self) -> Result<Keypair, Self::Error> {
-        let secp = Secp256k1::new();
-        Keypair::from_seckey_slice(&secp, &self.secret_key)
-            .map_err(|e| BoltzError::new("Key".to_string(), e.to_string()))
-    }
-}
-
-impl From<Keypair> for KeyPair {
-    fn from(value: Keypair) -> Self {
-        KeyPair {
-            secret_key: value.secret_bytes().to_vec(),
-            public_key: value.public_key().encode(),
-        }
-    }
-}
-
-impl From<DecodeError> for MannaError {
-    fn from(value: DecodeError) -> Self {
-        MannaError {
-            kind: Some("base64".to_string()),
-            msg: value.to_string(),
-        }
-    }
-}
 impl From<aes_kw::Error> for MannaError {
     fn from(value: aes_kw::Error) -> Self {
         MannaError {
@@ -350,44 +271,225 @@ impl From<aes_gcm::Error> for MannaError {
 pub struct Crypto {}
 
 impl Crypto {
-    /// util function that validates if given liquid address belongs to xpub for given network
-    pub fn validate_liquid_address(
-        xpub: String,
-        address: String,
-        index: u32,
+    const TAG: u8 = 0x0a; // (1 << 3) | 2
+
+    fn encode_proto(key: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(2 + key.len());
+        out.push(Self::TAG);
+        // Compressed pubkeys are 33 bytes; fall back to error if ever larger.
+        let key_len: u8 = key.len().try_into().expect("key length exceeds 255 bytes");
+        out.push(key_len);
+        out.extend_from_slice(key);
+        out
+    }
+
+    fn decode_proto(buf: &[u8]) -> Result<&[u8], MannaError> {
+        if buf.len() >= 3 && buf[0] == Self::TAG && buf[1] as usize + 2 == buf.len() {
+            Ok(&buf[2..])
+        } else {
+            Err(MannaError::new("Invalid tag".to_string()))
+        }
+    }
+
+    #[frb(sync)]
+    /// Encodes spark identity pub key into spark address
+    pub fn encode_spark_address(
+        identity_pub_key_hex: String,
         network: Network,
-    ) -> Result<bool, MannaError> {
-        let liquid_address =
-            LwkAddress::from_str(&address).map_err(|e| MannaError::new(e.to_string()))?;
+    ) -> Result<String, MannaError> {
+        let bytes =
+            hex::decode(identity_pub_key_hex).map_err(|e| MannaError::new(e.to_string()))?;
+        PublicKey::from_slice(&bytes)
+            .map_err(|_| MannaError::new("InvalidSecp256k1".to_string()))?;
 
-        let is_valid_network = match network {
-            Network::Mainnet => liquid_address.params == &AddressParams::LIQUID,
-            Network::Testnet => liquid_address.params == &AddressParams::LIQUID_TESTNET,
-            Network::Regtest => liquid_address.params == &AddressParams::ELEMENTS,
-        };
-
-        if !is_valid_network {
-            return Ok(false);
+        if bytes.len() != 33 {
+            return Err(MannaError::new(format!("WrongKeyLength {}", bytes.len())));
         }
 
-        let target_program_hex = match liquid_address.payload {
-            lwk_wollet::elements::address::Payload::WitnessProgram { program, .. } => program,
-            _ => return Ok(false),
-        };
+        let hrp = Hrp::parse(match network {
+            Network::Mainnet => "spark",
+            Network::Testnet => "sparkt",
+            Network::Regtest => "sparkrt",
+        })
+        .expect("static HRP is valid");
+        let addr = bech32::encode::<Bech32m>(hrp, &Self::encode_proto(&bytes))
+            .map_err(|e| MannaError::new(e.to_string()))?;
 
-        let xpub = XPub::from_str(xpub.as_str()).map_err(|e| MannaError::new(e.to_string()))?;
-        let path: DerivationPath = DerivationPath::from_str(format!("m/0/{index}").as_str())?;
-        let derived = path.iter().fold(xpub, |current, child_num| {
-            let state = current.derive_child(child_num).ok();
-            if let Some(state) = state {
-                state
-            } else {
-                current
+        Ok(addr)
+    }
+
+    #[frb(sync)]
+    /// Decodes spark address into identity pub key
+    pub fn decode_spark_address(addr: String) -> Result<(String, Network), MannaError> {
+        if addr.len() > 90 {
+            return Err(MannaError::new("InvalidLength".to_string()));
+        }
+
+        let has_upper = addr.bytes().any(|b| b.is_ascii_uppercase());
+        let has_lower = addr.bytes().any(|b| b.is_ascii_lowercase());
+        if has_upper && has_lower {
+            return Err(MannaError::new("MixedCaseAddress".to_string()));
+        }
+
+        let (hrp, proto) = bech32::decode(&addr).map_err(|e| MannaError::new(e.to_string()))?;
+
+        // The Bech32 spec requires the HRP to be lowercase. The `bech32`
+        // crate accepts uppercase HRPs, so we enforce the stricter rule
+        // here.
+        let hrp_str = hrp.to_string();
+        if hrp_str.bytes().any(|b| b.is_ascii_uppercase()) {
+            return Err(MannaError::new("MixedCaseAddress".to_string()));
+        }
+
+        // Reject legacy Bech32 (BIP-173) by re-encoding with Bech32m and
+        // comparing the checksum. If it differs, the original variant must
+        // have been classic Bech32.
+        let reencoded =
+            bech32::encode::<Bech32m>(hrp, &proto).map_err(|e| MannaError::new(e.to_string()))?;
+        if reencoded.to_lowercase() != addr.to_lowercase() {
+            return Err(MannaError::new("Address is not Bech32m".to_string()));
+        }
+
+        let network = match hrp_str.as_str() {
+            "spark" => Some(Network::Mainnet),
+            "sparkt" => Some(Network::Testnet),
+            "sparkrt" => Some(Network::Regtest),
+            _ => None,
+        }
+        .ok_or_else(|| MannaError::new(format!("unknown HRP prefix: {}", hrp_str.clone())))?;
+
+        let key = Self::decode_proto(&proto)?;
+
+        if key.len() != 33 {
+            return Err(MannaError::new(format!(
+                "wrong pubkey length: {} (expected 33)",
+                key.len()
+            )));
+        }
+
+        let hex_key = hex::encode(key);
+        PublicKey::from_slice(key).map_err(|_| MannaError::new("InvalidSecp256k1".to_string()))?;
+
+        Ok((hex_key, network))
+    }
+
+    #[frb(sync)]
+    /// parses bolt11 invoice, if you want to extract bip21 address used to create this lightning invoice use [Self::from_bolt11_invoice] instead.
+    pub fn decode_bolt11_invoice(invoice: String) -> Result<DecodedInvoice, MannaError> {
+        let inv = Bolt11Invoice::from_str(&invoice).map_err(|e| MannaError::new(e.to_string()))?;
+        let millis_since_epoch = std::time::UNIX_EPOCH
+            .elapsed()
+            .map_err(|e| MannaError::new(e.to_string()))?;
+        let network = match inv.network() {
+            bitcoin::Network::Bitcoin => Network::Mainnet,
+            bitcoin::Network::Testnet | bitcoin::Network::Testnet4 | bitcoin::Network::Signet => {
+                Network::Testnet
             }
-        });
-        let computed_hash = hash160::Hash::hash(derived.public_key().to_bytes().as_slice());
+            bitcoin::Network::Regtest => Network::Regtest,
+        };
+        Ok(DecodedInvoice {
+            expires_at: inv
+                .expires_at()
+                .unwrap_or(Duration::from_secs(0))
+                .as_millis(),
+            is_expired: millis_since_epoch >= inv.expires_at().unwrap_or(Duration::from_secs(0)),
+            msats: inv.amount_milli_satoshis().unwrap_or(0),
+            network,
+            bip21: None,
+            preimage_hash: inv.payment_hash().to_string(),
+            description: Some(inv.description().to_string()),
+            issuer: None,
+        })
+    }
 
-        Ok(computed_hash.as_byte_array() == target_program_hex.as_slice())
+    /// function to validate bolt12 lightning offer
+    pub fn decode_bolt12_offer(offer: String) -> Result<DecodedBolt12Offer, MannaError> {
+        let offer = offer
+            .parse::<Offer>()
+            .map_err(|e| MannaError::new(format!("Failed to parse Offer: {:?}", e)))?;
+
+        Ok(DecodedBolt12Offer {
+            id: offer.id().to_string(),
+            parsed_offer: offer.to_string(),
+            is_expired: offer.is_expired(),
+            networks: offer
+                .chains()
+                .iter()
+                .map(|e| match e {
+                    &ChainHash::BITCOIN => Network::Mainnet,
+                    &ChainHash::TESTNET4 => Network::Testnet,
+                    _ => Network::Regtest,
+                })
+                .collect(),
+            amount: offer
+                .amount()
+                .map(|a| match a {
+                    Amount::Bitcoin { amount_msats } => Some(amount_msats),
+                    Amount::Currency { .. } => None,
+                })
+                .flatten(),
+            description: offer.description().map(|s| s.to_string()),
+            issuer: offer.issuer().map(|s| s.to_string()),
+        })
+    }
+
+    /// function to fetch bolt12 lightning offer for a given username using DNS query according to BIP-353
+    pub async fn fetch_bolt12_offer_uri_from_username(
+        network: Network,
+        username: String,
+    ) -> Result<Option<String>, MannaError> {
+        let resolver = Bip353Resolver::with_config(match network {
+            Network::Mainnet => ResolverConfig::default(),
+            Network::Testnet => ResolverConfig::testnet(),
+            Network::Regtest => ResolverConfig::regtest(),
+        })
+        .map_err(|e| MannaError::from("BIP-353 resolver config".to_string(), e.to_string()))?;
+        let offer = resolver
+            .resolve_address(&username)
+            .await
+            .map_err(|e| MannaError::new(format!("BIP 353 resolution failed: {e}")))?;
+        if offer.is_reusable && offer.payment_type == PaymentType::LightningOffer {
+            return Ok(Some(offer.uri));
+        }
+        Ok(None)
+    }
+
+    /// helper function to parse bolt12 invoice
+    #[frb(ignore)]
+    pub fn parse_bolt12_invoice(invoice: String) -> Result<Bolt12Invoice, MannaError> {
+        let p = bech32::primitives::decode::CheckedHrpstring::new::<bech32::NoChecksum>(&invoice)
+            .map_err(|e| MannaError::from("Bolt12 invoice".to_string(), e.to_string()))?;
+        if p.hrp().to_lowercase() != "lni" {
+            return Err(MannaError::new(
+                "invalid hrp for bolt12 invoice".to_string(),
+            ));
+        }
+        let data = p.byte_iter().collect::<Vec<u8>>();
+        let bolt12_invoice = Bolt12Invoice::try_from(data)
+            .map_err(|e| MannaError::new(format!("Failed to parse BOLT12 invoice: {:?}", e)))?;
+
+        Ok(bolt12_invoice)
+    }
+
+    #[frb(sync)]
+    pub fn decode_bolt12_invoice(invoice: String) -> Result<DecodedInvoice, MannaError> {
+        let inv = Self::parse_bolt12_invoice(invoice)?;
+        Ok(DecodedInvoice {
+            msats: inv.amount_msats(),
+            expires_at: inv.relative_expiry().as_millis(),
+            is_expired: inv.is_expired(),
+            network: if inv.chain() == ChainHash::BITCOIN {
+                Network::Mainnet
+            } else if inv.chain() == ChainHash::TESTNET4 {
+                Network::Testnet
+            } else {
+                Network::Regtest
+            },
+            bip21: None,
+            preimage_hash: inv.payment_hash().to_string(),
+            description: inv.payer_note().map(|s: PrintableString| s.to_string()),
+            issuer: inv.issuer().map(|s: PrintableString| s.to_string()),
+        })
     }
 
     pub(crate) fn vec_to_array<T, const N: usize>(v: Vec<T>) -> Result<[T; N], MannaError> {
@@ -430,63 +532,6 @@ impl Crypto {
         Ok(BIP32::from_mnemonics(swap_mnemonic, None)?
             .derive_path("m/8888'/0'".to_string())?
             .get_key_pair())
-    }
-
-    pub fn generate_lnurl_pool(
-        swap_mnemonics: &str,
-        network: Network,
-        indices: Vec<u64>,
-        addresses: Option<Vec<(u64, String)>>,
-    ) -> Result<Vec<LnurlPoolEntry>, MannaError> {
-        let swap_master_key = SwapMasterKey::from_mnemonic(swap_mnemonics, None, network.into())
-            .map_err(|e| MannaError::new(e.to_string()))?;
-
-        if addresses.as_ref().is_some_and(|a| a.len() != indices.len()) {
-            return Err(MannaError::new(
-                "Addresses length must match indices".to_string(),
-            ));
-        }
-
-        let build_entry = |lnurl_index: u64,
-                           addr_opt: Option<(u64, String)>|
-         -> Result<LnurlPoolEntry, MannaError> {
-            let claim_keypair = swap_master_key
-                .derive_liquid_swapkey(lnurl_index)
-                .map_err(|e| MannaError::new(e.to_string()))?;
-
-            let address_entry = if let Some((addr_idx, addr)) = addr_opt {
-                let sig = sign_address(&addr, &claim_keypair)
-                    .map_err(|e| MannaError::new(e.to_string()))?;
-
-                Some(AddressEntry {
-                    index: addr_idx,
-                    address: addr,
-                    signature: sig.to_string(),
-                })
-            } else {
-                None
-            };
-
-            Ok(LnurlPoolEntry {
-                index: lnurl_index,
-                address: address_entry,
-                preimage: Preimage::from_swap_key(&claim_keypair).into(),
-                claim_key: claim_keypair.into(),
-            })
-        };
-
-        if let Some(addrs) = addresses {
-            indices
-                .into_iter()
-                .zip(addrs)
-                .map(|(idx, addr_tuple)| build_entry(idx, Some(addr_tuple)))
-                .collect()
-        } else {
-            indices
-                .into_iter()
-                .map(|idx| build_entry(idx, None))
-                .collect()
-        }
     }
 
     pub fn encrypt_chat_message(
@@ -664,31 +709,6 @@ impl Crypto {
         } else {
             Ok(signature.serialize_compact().to_vec())
         }
-    }
-}
-
-#[frb]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum WalletType {
-    Full,
-    WatchOnly,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LiquidWallet {
-    pub uuid: String,
-    pub wallet_type: WalletType,
-    pub descriptor: String,
-    pub swap_mnemonic: String,
-
-    pub upsert_derivation_private_key_hex: Option<String>, // used to sign the payload to upsert wallet data
-    pub wallet_name: Option<String>,
-}
-
-impl LiquidWallet {
-    pub(super) fn init(&self, lwk_path: String, network: Network) -> Result<Wallet, MannaError> {
-        Wallet::init(network, lwk_path, self.descriptor.clone())
-            .map_err(|e| MannaError::from("LWK".to_string(), e.msg))
     }
 }
 

@@ -1,14 +1,19 @@
+import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart';
 import 'package:flutter/material.dart';
 import 'package:manna/globals.dart';
 import 'package:manna/models/transaction.dart';
 import 'package:manna/services/db.dart';
 import 'package:manna/services/transaction_service.dart';
+import 'package:manna/utils/extensions.dart';
 import 'package:manna/utils/state_extension.dart';
 import 'package:manna/widgets/transaction_card.dart';
 import 'package:manna/widgets/bottom sheets/transaction_filter_bottom_sheet.dart';
 
 // direction: 1 incoming 2 outgoing 3 all
-// type: 1 liquid 2 lightning 3 all
+// type: 3 bit int
+//    1st bit : lightning
+//    2nd bit : bitcoin
+//    3rd bit : spark
 typedef FilterData = ({
   DateTimeRange? pickedRange,
   RangeValues? amountRange,
@@ -39,7 +44,7 @@ class AllTransactionScreen extends StatefulWidget {
 }
 
 class _AllTransactionScreenState extends State<AllTransactionScreen> {
-  FilterData filterData = (type: 3, direction: 3, amountRange: null, pickedRange: null, categories: <String>{});
+  FilterData filterData = (type: 7, direction: 3, amountRange: null, pickedRange: null, categories: <String>{});
   List<Transaction> sortedTransactions = [];
 
   @override
@@ -67,33 +72,34 @@ class _AllTransactionScreenState extends State<AllTransactionScreen> {
 
   void refreshData() {
     sortedTransactions = getFilteredTransactions().toList();
-    sortedTransactions.sort(
-      (a, b) => a.confirmationTimestamp == b.confirmationTimestamp
-          ? b.timestamp.compareTo(a.timestamp)
-          : b.txTimestamp.compareTo(a.txTimestamp),
-    );
-
+    sortedTransactions.sort((a, b) => b.timestamp.compareTo(a.timestamp));
     update();
   }
 
   List<Transaction> getFilteredTransactions() {
-    final wallet = DB.accounts[widget.accountId]?.currentWallet;
-    if (wallet == null) return [];
+    final walletId = DB.accounts[widget.accountId]?.currentWallet.uuid;
+    if (walletId == null) return [];
 
     return DB.transactions.values
         .where(
           (e) =>
-              e.walletId == wallet.uuid &&
+              e.walletId == walletId &&
               (filterData.categories.isEmpty || filterData.categories.any((c) => e.categories.contains(c))) &&
               (filterData.pickedRange == null ||
-                  ((e.txTimestamp.isAfter(filterData.pickedRange!.start)) &&
-                      (e.txTimestamp.isBefore(filterData.pickedRange!.end)))) &&
+                  ((e.timestamp.isAfter(filterData.pickedRange!.start)) &&
+                      (e.timestamp.isBefore(filterData.pickedRange!.end)))) &&
               (filterData.amountRange == null ||
-                  (e.amount.abs() >= filterData.amountRange!.start && e.amount.abs() <= filterData.amountRange!.end)) &&
-              (filterData.type == 3 || (filterData.type == 1 && e.liquidTx != null)) &&
+                  (e.inner.amount.i.abs() >= filterData.amountRange!.start &&
+                      e.inner.amount.i.abs() <= filterData.amountRange!.end)) &&
+              (filterData.type == 0 ||
+                  filterData.type == 7 ||
+                  (filterData.type & 4 != 0 && e.inner.details is PaymentDetails_Lightning) ||
+                  (filterData.type & 2 != 0 && e.inner.details is PaymentDetails_Deposit ||
+                      e.inner.details is PaymentDetails_Withdraw) ||
+                  (filterData.type & 1 != 0 && e.inner.details is PaymentDetails_Spark)) &&
               (filterData.direction == 3 ||
-                  (filterData.direction == 1 && e.isIncoming) ||
-                  (filterData.direction == 2 && !e.isIncoming)),
+                  (filterData.direction == 1 && e.inner.paymentType == PaymentType.receive) ||
+                  (filterData.direction == 2 && e.inner.paymentType == PaymentType.send)),
         )
         .toList();
   }

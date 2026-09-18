@@ -2,12 +2,9 @@ use std::str::FromStr;
 
 use super::error::LwkError;
 use lwk_wollet::{
-    ElectrumClient,
     blocking::BlockchainBackend,
-    elements::{
-        Transaction,
-        pset::{PartiallySignedTransaction, serialize::Deserialize},
-    },
+    elements::{encode::deserialize, pset::PartiallySignedTransaction, Transaction},
+    ElectrumClient,
 };
 
 pub struct Blockchain {}
@@ -18,7 +15,7 @@ impl Blockchain {
         let electrum_url = lwk_wollet::ElectrumUrl::from_str(&electrum_url)
             .map_err(|e| LwkError { msg: e.to_string() })?;
         let electrum_client = ElectrumClient::new(&electrum_url)?;
-        let tx = Transaction::deserialize(&tx_bytes)?;
+        let tx: Transaction = deserialize(&tx_bytes)?;
         let txid = electrum_client.broadcast(&tx)?;
         Ok(txid.to_string())
     }

@@ -24,8 +24,10 @@ class LogScreen extends StatefulWidget {
 
 class _LogScreenState extends State<LogScreen> {
   List<LogEntry> flutter = [];
+  List<LogEntry> breez = [];
   List<LogEntry> native = [];
   List<LogEntry> rust = [];
+
   bool isSearching = false;
   final searchDeBouncer = DeBouncer(const Duration(milliseconds: 500));
   final searchController = SearchTagStylingTextEditingController();
@@ -55,9 +57,11 @@ class _LogScreenState extends State<LogScreen> {
     final logFiles = await LogManager.getRecentLogFiles();
     for (final logFile in logFiles) {
       final filePath = logFile.path;
-      // android, ios, flutter, rust
+
       if (path.basename(filePath).startsWith('flutter') && (file == null || file == 'flutter')) {
         flutter = await LogManager.fetchFileLogs(filePath);
+      } else if (path.basename(filePath).startsWith('breez') && (file == null || file == 'breez')) {
+        breez = await LogManager.fetchFileLogs(filePath);
       } else if (Platform.isAndroid &&
           path.basename(filePath).startsWith('android') &&
           (file == null || file == 'native')) {
@@ -91,8 +95,9 @@ class _LogScreenState extends State<LogScreen> {
       }
     }
 
-    native.sort((a, b) => b.timestamp.compareTo(a.timestamp));
     flutter.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    breez.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    native.sort((a, b) => b.timestamp.compareTo(a.timestamp));
     rust.sort((a, b) => b.timestamp.compareTo(a.timestamp));
     update();
   }
@@ -139,6 +144,7 @@ class _LogScreenState extends State<LogScreen> {
                         onPressed: () async {
                           await LogManager.clearAllLogs();
                           flutter.clear();
+                          breez.clear();
                           native.clear();
                           rust.clear();
                           update();
@@ -190,7 +196,12 @@ class _LogScreenState extends State<LogScreen> {
             child: CupertinoSlidingSegmentedControl(
               groupValue: selectedTab,
               onValueChanged: (val) => selectTab(val ?? 0),
-              children: {0: buildSegment('Flutter'), 1: buildSegment('Native'), 2: buildSegment('Rust')},
+              children: {
+                0: buildSegment('Flutter'),
+                1: buildSegment('Spark'),
+                2: buildSegment('Native'),
+                3: buildSegment('Rust'),
+              },
               padding: const EdgeInsets.all(8),
             ),
           ),
@@ -207,6 +218,21 @@ class _LogScreenState extends State<LogScreen> {
                     }
                     return RefreshIndicator(
                       onRefresh: () => fetchLogs(file: 'flutter'),
+                      child: ListView.builder(
+                        itemCount: logs.length,
+                        itemBuilder: (context, index) => logTile(logs[index]),
+                      ),
+                    );
+                  },
+                ),
+                Builder(
+                  builder: (context) {
+                    final logs = applySearch(breez);
+                    if (logs.isEmpty) {
+                      return const Center(child: Text('No logs yet'));
+                    }
+                    return RefreshIndicator(
+                      onRefresh: () => fetchLogs(file: 'breez'),
                       child: ListView.builder(
                         itemCount: logs.length,
                         itemBuilder: (context, index) => logTile(logs[index]),

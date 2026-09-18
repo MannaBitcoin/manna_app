@@ -1,10 +1,11 @@
 import 'dart:async';
+
+import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart' show GetSparkStatusRequest, getSparkStatus, ServiceStatus;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:lottie/lottie.dart';
 import 'package:manna/app_state.dart';
-import 'package:manna/config.dart';
 import 'package:manna/globals.dart';
 import 'package:manna/models/account.dart';
 import 'package:manna/models/chat_message.dart';
@@ -13,13 +14,12 @@ import 'package:manna/router.dart';
 import 'package:manna/screens/all_transaction_screen.dart';
 import 'package:manna/screens/backup_reminder_screen.dart';
 import 'package:manna/screens/contact_screen.dart';
+import 'package:manna/screens/menu_screen.dart';
 import 'package:manna/screens/receive_screen.dart';
 import 'package:manna/screens/send_screen.dart';
-import 'package:manna/screens/menu_screen.dart';
 import 'package:manna/screens/shop_screen.dart';
 import 'package:manna/screens/trade_screen.dart';
 import 'package:manna/screens/wallet_management_screen.dart';
-import 'package:manna/services/boltz_service.dart';
 import 'package:manna/services/db.dart';
 import 'package:manna/services/deep_link_service.dart';
 import 'package:manna/services/hints_service.dart';
@@ -56,13 +56,11 @@ class WalletScreenState extends State<WalletScreen> {
 
   bool canPop = true;
 
+  ServiceStatus? sparkStatus;
+
   void refreshData({bool updateFrame = true}) {
     final txs = DB.transactions.values.where((t) => t.walletId == selectedWallet.uuid).toList();
-    txs.sort(
-      (a, b) => a.confirmationTimestamp == b.confirmationTimestamp
-          ? b.timestamp.compareTo(a.timestamp)
-          : b.txTimestamp.compareTo(a.txTimestamp),
-    );
+    txs.sort((a, b) => b.timestamp.compareTo(a.timestamp));
     txItems = txs.take(25).toList();
     if (updateFrame) update();
   }
@@ -107,6 +105,10 @@ class WalletScreenState extends State<WalletScreen> {
       final prevCanPop = canPop;
       canPop = !dragController.isAttached || dragController.size < 0.8;
       if (prevCanPop != canPop) update();
+    });
+
+    Future(() async {
+      sparkStatus = (await getSparkStatus(request: const GetSparkStatusRequest())).status;
     });
 
     super.initState();
@@ -241,10 +243,6 @@ class WalletScreenState extends State<WalletScreen> {
             RefreshIndicator(
               onRefresh: () async {
                 DB.loadAllData();
-                unawaited(BoltzService.processPendingSwaps(network: Network.mainnet));
-                if (Config.isRegtestOn) {
-                  unawaited(BoltzService.processPendingSwaps(network: Network.regtest));
-                }
                 await Future.any([
                   WalletService.sync(xpub: currentWallet.xpub),
                   Future.delayed(const Duration(seconds: 15)),
@@ -301,14 +299,12 @@ class WalletScreenState extends State<WalletScreen> {
                                       ...dropdownAccounts.map(
                                         (acc) => DropdownMenuItem<String>(
                                           value: acc.id,
-                                          enabled: acc.currentWallet.liquidWollet != null,
+                                          enabled: acc.currentWallet.spark != null,
                                           child: Row(
                                             spacing: 12,
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
                                               Text(acc.name, maxLines: 2, overflow: TextOverflow.ellipsis),
-                                              if (acc.currentWallet.type == WalletType.watchOnly)
-                                                const Icon(Icons.remove_red_eye_outlined, color: Colors.white),
                                               Badge(
                                                 isLabelVisible: DB.conversationsBox.values
                                                     .where(
@@ -321,7 +317,7 @@ class WalletScreenState extends State<WalletScreen> {
                                                 backgroundColor: Colors.white38,
                                                 smallSize: 8,
                                               ),
-                                              if (acc.currentWallet.liquidWollet == null) ...[
+                                              if (acc.currentWallet.spark == null) ...[
                                                 const Spacer(),
                                                 const CircularProgressIndicator(color: Colors.white),
                                               ],
@@ -418,26 +414,16 @@ class WalletScreenState extends State<WalletScreen> {
                                           ),
                                         ),
                                 ),
-                                // const SizedBox(height: 16),
-                                // ValueListenableBuilder(
-                                //   valueListenable: DbService.isSyncing,
-                                //   builder: (context, value, child) {
-                                //     return Shimmer.fromColors(
-                                //       key: Key(value.toString()),
-                                //       baseColor: Colors.grey.shade100,
-                                //       highlightColor: AppColors.primaryColor,
-                                //       shimmerState: value ? ShimmerState.running : ShimmerState.stopped,
-                                //       child: Text(
-                                //         value ? 'Syncing DB...' : '',
-                                //         style: TextStyle(
-                                //           color: Colors.grey.shade800,
-                                //           fontSize: 16,
-                                //           fontWeight: FontWeight.w500,
-                                //         ),
-                                //       ),
-                                //     );
-                                //   },
-                                // ),
+
+                                if (sparkStatus != null &&
+                                    !{ServiceStatus.operational, ServiceStatus.unknown}.contains(sparkStatus))
+                                  Text(switch (sparkStatus!) {
+                                    ServiceStatus.degraded => 'Spark is experiencing degraded performance',
+                                    ServiceStatus.partial => 'Spark is partially unavailable',
+                                    ServiceStatus.major => 'Spark is experiencing a major outage',
+                                    ServiceStatus.operational => throw UnimplementedError(),
+                                    ServiceStatus.unknown => throw UnimplementedError(),
+                                  }),
                               ],
                             ),
                           ),

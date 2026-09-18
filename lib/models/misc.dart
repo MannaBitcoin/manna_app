@@ -1,11 +1,9 @@
-import 'dart:convert';
-
+import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart' show InputType, SendOnchainFeeQuote;
 import 'package:manna/models/account.dart';
 import 'package:manna/models/contact.dart';
-import 'package:manna/models/wallet.dart';
+import 'package:manna/models/enums.dart';
 import 'package:manna/utils/parser.dart';
 import 'package:manna/utils/sats_extension.dart';
-import 'package:manna_core/manna_core.dart' show Swap;
 
 class Nullable<T> {
   Nullable(this.value);
@@ -16,118 +14,81 @@ class Nullable<T> {
 class AddressData {
   AddressData({
     required this.addressType,
+    required this.data,
     required this.address,
     this.amount = 0,
     this.lockAmount = false,
-    this.memo,
+    this.comment,
     this.fallback,
-    this.lnurlData,
-    this.successAction,
   });
 
   final AddressType addressType;
+  final InputType? data;
   final String address;
   final int amount;
   final bool lockAmount;
-  final String? memo;
+  final String? comment;
 
   /// Optional fallback data in URI like
   /// bolt11 invoice https://github.com/theDavidCoen/BIP21-URIs-with-Lightning-invoice-fallback-to-on-chain-support
   final AddressData? fallback;
-  final Map<String, dynamic>? lnurlData;
-  final Map<String, dynamic>? successAction;
 
   AddressData copyWith({
     AddressType? addressType,
+    InputType? data,
     String? address,
     int? amount,
     bool? lockAmount,
-    Nullable<String?>? memo,
+    Nullable<String?>? comment,
     Nullable<AddressData?>? fallback,
-    Nullable<Map<String, dynamic>?>? successAction,
-    Nullable<Map<String, dynamic>?>? lnurlData,
   }) => AddressData(
     addressType: addressType ?? this.addressType,
+    data: data ?? this.data,
     address: address ?? this.address,
     amount: amount ?? this.amount,
     lockAmount: lockAmount ?? this.lockAmount,
-    memo: memo != null ? memo.value : this.memo,
+    comment: comment != null ? comment.value : this.comment,
     fallback: fallback != null ? fallback.value : this.fallback,
-    successAction: successAction != null ? successAction.value : this.successAction,
-    lnurlData: lnurlData != null ? lnurlData.value : this.lnurlData,
   );
-
-  Map<String, dynamic> _toMap() => {
-    'addressType': addressType.name,
-    'address': address,
-    'amount': amount,
-    'memo': memo,
-    'fallback': fallback?._toMap(),
-    'lnurlData': lnurlData,
-    'successAction': successAction,
-  };
-
-  @override
-  String toString() => jsonEncode(_toMap());
 }
 
 class PayOutData {
   PayOutData({
     required this.account,
-    required this.liquidLockupAddress,
     required this.userEnteredAddress,
     required this.calculation,
-    this.memo,
+    required this.addressData,
     this.note,
     this.category,
-    this.swap,
-    this.sendAll,
     this.receiverDetail,
-    this.lnurlSuccessActionData,
     this.brantaData,
   });
 
   final Account account;
-  final String liquidLockupAddress;
-  final String userEnteredAddress;
+  final String userEnteredAddress; // used to show on confirm screen
+  final AddressData addressData;
   final FeesAndAmounts calculation;
-  final Swap? swap;
-  final bool? sendAll;
   final Contact? receiverDetail;
-  final String? memo;
   final String? note;
   final Set<String>? category;
-
-  // https://github.com/lnurl/luds/blob/luds/09.md
-  final Map<String, dynamic>? lnurlSuccessActionData;
   final BrantaData? brantaData;
 
   PayOutData copyWith({
     Account? account,
-    String? liquidLockupAddress,
     FeesAndAmounts? calculation,
-    Nullable<String?>? memo,
+    AddressData? addressData,
     Nullable<String?>? note,
     Nullable<Set<String>?>? category,
-    Nullable<Swap?>? swap,
-    Nullable<Map<String, dynamic>?>? lnurlSuccessActionData,
-    bool? sendAll,
     Nullable<Contact?>? receiverDetail,
     Nullable<BrantaData?>? brantaData,
   }) {
     return PayOutData(
       account: account ?? this.account,
-      liquidLockupAddress: liquidLockupAddress ?? this.liquidLockupAddress,
       userEnteredAddress: userEnteredAddress,
       calculation: calculation ?? this.calculation,
-      memo: memo != null ? memo.value : this.memo,
+      addressData: addressData ?? this.addressData,
       note: note != null ? note.value : this.note,
       category: category != null ? category.value : this.category,
-      swap: swap != null ? swap.value : this.swap,
-      lnurlSuccessActionData: lnurlSuccessActionData != null
-          ? lnurlSuccessActionData.value
-          : this.lnurlSuccessActionData,
-      sendAll: sendAll ?? this.sendAll,
       receiverDetail: receiverDetail != null ? receiverDetail.value : this.receiverDetail,
       brantaData: brantaData != null ? brantaData.value : this.brantaData,
     );

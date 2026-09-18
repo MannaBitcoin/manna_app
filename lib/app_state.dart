@@ -23,7 +23,6 @@ class AppState {
 
   static bool get isPrivacyModeOn => prefs.getBool('isPrivacyModeOn') ?? false;
   static bool get isShopTipsOn => prefs.getBool('isStoreTipsOn') ?? false;
-  static bool get payerPayShopFee => prefs.getBool('payerPayShopFee') ?? false;
   static int get blockExplorer => prefs.getInt('blockExplorer') ?? 0;
   static int get bitcoinDisplayStyle => prefs.getInt('bitcoinDisplayStyle') ?? 0;
   static ThemeMode get theme => ThemeMode.values[prefs.getInt('theme') ?? 0];
@@ -32,7 +31,6 @@ class AppState {
 
   static set isPrivacyModeOn(bool value) => prefs.setBool('isPrivacyModeOn', value);
   static set isShopTipsOn(bool value) => prefs.setBool('isStoreTipsOn', value);
-  static set payerPayShopFee(bool value) => prefs.setBool('payerPayShopFee', value);
   static set blockExplorer(int value) => prefs.setInt('blockExplorer', value);
   static set bitcoinDisplayStyle(int value) {
     prefs.setInt('bitcoinDisplayStyle', value);
@@ -45,17 +43,6 @@ class AppState {
 
   static CountryModel get selectedCurrency => CountryModel.fromPrefs(prefs.getString('selectedCurrency') ?? '{}');
   static set selectedCurrency(CountryModel model) => prefs.setString('selectedCurrency', jsonEncode(model.toJson()));
-
-  static Set<String> get trustMinimizedLNURLAccounts =>
-      (prefs.getStringList('trustMinimizedLNURLAccounts') ?? []).toSet();
-
-  static set trustMinimizedLNURLAccounts(List<String> data) => prefs.setStringList('trustMinimizedLNURLAccounts', data);
-
-  static Set<String> get trustMinimizedBolt12Accounts =>
-      (prefs.getStringList('trustMinimizedBolt12Accounts') ?? []).toSet();
-
-  static set trustMinimizedBolt12Accounts(List<String> data) =>
-      prefs.setStringList('trustMinimizedBolt12Accounts', data);
 
   // currency code: currency Symbol
   static final Map<String, String> currencySymbols = {};

@@ -11,24 +11,19 @@ import 'package:flutter/services.dart';
 import 'package:manna/app_state.dart';
 import 'package:manna/config.dart';
 import 'package:manna/models/account.dart';
-import 'package:manna/models/swap.dart';
 import 'package:manna/router.dart';
 import 'package:manna/screens/chat_screen.dart';
 import 'package:manna/screens/contact_screen.dart';
 import 'package:manna/screens/menu_screen.dart';
-import 'package:manna/screens/swap_detail_screen.dart';
 import 'package:manna/screens/transaction_detail_screen.dart';
-import 'package:manna/services/boltz_service.dart';
 import 'package:manna/services/connectivity_checker.dart';
 import 'package:manna/services/db.dart';
 import 'package:manna/services/log_service.dart';
 import 'package:manna/services/secure_storage.dart';
 import 'package:manna/services/wallet_service.dart';
-import 'package:manna/utils/de_bouncer.dart';
 import 'package:manna/utils/extensions.dart';
 import 'package:manna/utils/parser.dart';
 import 'package:manna/utils/util.dart';
-import 'package:manna/widgets/bottom%20sheets/receiving_tx_bottom_sheet.dart';
 import 'package:manna_core/manna_core.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -255,9 +250,9 @@ class NotificationService {
           if (receiverWallet != null) {
             await WalletService.partialSync(xpub: receiverWallet.xpub);
             if (DB.transactions[IdWithWallet(walletId: receiverWalletId, id: txId)] == null) {
-              await ReceivingTxService.addReceivingTxs([
-                ReceivingTx(walletId: receiverWalletId, txId: txId, amount: amount),
-              ], forNotificationClick: true);
+              // await ReceivingTxService.addReceivingTxs([
+              //   ReceivingTx(walletId: receiverWalletId, txId: txId, amount: amount),
+              // ], forNotificationClick: true);
               await WalletService.sync(xpub: receiverWallet.xpub);
             } else {
               AppRouter.replaceIfExists(
@@ -268,18 +263,18 @@ class NotificationService {
             }
           }
 
-        case 'swap_detail':
-          final swapId = parseString(data['swapId']);
-          if (swapId.isNotEmpty) {
-            unawaited(AppRouter.push(SwapDetailScreen(swapId: swapId)));
-          }
+        // case 'swap_detail':
+        //   final swapId = parseString(data['swapId']);
+        //   if (swapId.isNotEmpty) {
+        //     unawaited(AppRouter.push(SwapDetailScreen(swapId: swapId)));
+        //   }
       }
     } catch (e, s) {
       logE(e, stackTrace: s);
     }
   }
 
-  static final lnurlNotificationThrottle = Throttler(const Duration(seconds: 10));
+  // static final lnurlNotificationThrottle = Throttler(const Duration(seconds: 10));
 
   static Future<void> handleFCMMessage(Map<String, dynamic> messageData) async {
     if (messageData.isNotEmpty && messageData['type'] != null) {
@@ -294,24 +289,24 @@ class NotificationService {
         case 'new_message_chat':
         // Nothing here cause when app is in foreground, the realtime will craft notification.
 
-        case 'lnurl':
-          List<String> ids = [];
-          try {
-            if (messageData['swapIds'] is String) {
-              final swapIds = jsonDecode(messageData['swapIds']);
-              if (swapIds is List && swapIds.isNotEmpty) {
-                ids = parseList(swapIds, (e) => parseString(e));
-              }
-            }
-          } catch (e, s) {
-            logE(e, stackTrace: s);
-          }
-          await lnurlNotificationThrottle.run(() async {
-            await BoltzService.processPendingSwaps(network: network, lnurlSwapIdsToProcess: ids);
-          });
-
-        case 'swap_webhook':
-          await BoltzService.processPendingSwaps(network: network);
+        // case 'lnurl':
+        //   List<String> ids = [];
+        //   try {
+        //     if (messageData['swapIds'] is String) {
+        //       final swapIds = jsonDecode(messageData['swapIds']);
+        //       if (swapIds is List && swapIds.isNotEmpty) {
+        //         ids = parseList(swapIds, (e) => parseString(e));
+        //       }
+        //     }
+        //   } catch (e, s) {
+        //     logE(e, stackTrace: s);
+        //   }
+        //   await lnurlNotificationThrottle.run(() async {
+        //     await BoltzService.processPendingSwaps(network: network, lnurlSwapIdsToProcess: ids);
+        //   });
+        //
+        // case 'swap_webhook':
+        //   await BoltzService.processPendingSwaps(network: network);
 
         case 'received_tx':
           final txId = parseString(messageData['txId']);
@@ -321,12 +316,12 @@ class NotificationService {
           final receiverWallet = DB.allWallets.where((w) => w.uuid == receiverWalletId).firstOrNull;
           if (receiverWallet != null) {
             if (DB.transactions[IdWithWallet(walletId: receiverWalletId, id: txId)] == null) {
-              await ReceivingTxService.addReceivingTxs([
-                ReceivingTx(walletId: receiverWalletId, txId: txId, amount: amount),
-              ]);
+              // await ReceivingTxService.addReceivingTxs([
+              //   ReceivingTx(walletId: receiverWalletId, txId: txId, amount: amount),
+              // ]);
               await WalletService.sync(xpub: receiverWallet.xpub);
             } else {
-              await ReceivingTxService.removeReceivingTx(txId);
+              // await ReceivingTxService.removeReceivingTx(txId);
               AppRouter.replaceIfExists(
                 TransactionDetailScreen(
                   id: IdWithWallet(walletId: receiverWalletId, id: txId),
@@ -377,32 +372,18 @@ class AppGroupSharedService {
     if (_groupContainerPathCache == null) return;
 
     await _syncWalletFile();
-    await _syncSwapFile();
     await _syncChatFile();
-    await _syncBolt12File();
 
     DB.walletBox.watch().listen((event) async {
       // only handle new or deleted events
       if (walletLength != DB.fullWallets.length) {
         walletLength = DB.fullWallets.length;
         await _syncWalletFile();
-        await _syncSwapFile();
-        await _syncChatFile();
-      }
-    });
-    DB.woWalletBox.watch().listen((event) async {
-      // only handle new or deleted events
-      if (woWalletLength != DB.fullWallets.length) {
-        woWalletLength = DB.fullWallets.length;
-        await _syncWalletFile();
-        await _syncSwapFile();
         await _syncChatFile();
       }
     });
 
     DB.contactsBox.watch().listen((event) => _syncChatFile());
-    DB.swaps.box.watch().listen((event) => _syncSwapFile());
-    DB.bolt12Offers.box.watch().listen((event) => _syncBolt12File());
   }
 
   static Future<void> _syncWalletFile() async {
@@ -428,8 +409,6 @@ class AppGroupSharedService {
           return {
             'uuid': e.uuid,
             'wallet_type': e.type.name.capitalize,
-            'descriptor': e.descriptor,
-            'swap_mnemonic': await e.getSwapMnemonic(),
             if (e.type == WalletType.full) 'upsert_derivation_private_key_hex': privateKeyHex,
             'wallet_name': e.account.name,
           };
@@ -441,54 +420,6 @@ class AppGroupSharedService {
     }
   }
 
-  static Future<void> _syncSwapFile() async {
-    try {
-      final swapFile = await _readData(fileName: 'swaps');
-      final pendingSwaps = DB.swaps.values.where((e) => !e.isClosed && !isFinalSwapState(swap: e).$2);
-      final existingPendingSwaps = swapFile['pending_swaps'] is Map
-          ? (swapFile['pending_swaps'] as Map).cast<String, dynamic>()
-          : {};
-      for (final pendingSwap in existingPendingSwaps.entries) {
-        final swapId = parseString(pendingSwap.key);
-        if (DB.swaps[swapId] == null && pendingSwap.value is Map) {
-          try {
-            await (await SwapExtension.fromSerdeJson(jsonEncode(pendingSwap.value))).save();
-          } catch (e, s) {
-            logE(e, stackTrace: s);
-          }
-        }
-      }
-      existingPendingSwaps.removeWhere((key, value) {
-        final s = DB.swaps[parseString(key)];
-        if (s == null) return false;
-        return s.isClosed && isFinalSwapState(swap: s).$2;
-      });
-      swapFile['pending_swaps'] = <String, dynamic>{
-        ...existingPendingSwaps,
-        ...Map.fromEntries(pendingSwaps.map((e) => MapEntry(e.id, jsonDecode(e.toJson())))),
-      };
-
-      final Map<String, dynamic> unProcessedSwaps = {};
-      if (swapFile['completed_swaps'] is Map) {
-        for (final MapEntry(key: swapId, value: swapData)
-            in (swapFile['completed_swaps'] as Map).cast<String, dynamic>().entries) {
-          if (swapData is Map) {
-            try {
-              await (await SwapExtension.fromSerdeJson(jsonEncode(swapData))).save();
-              continue;
-            } catch (e, s) {
-              logE(e, stackTrace: s);
-            }
-          }
-          unProcessedSwaps[swapId] = swapData;
-        }
-      }
-      swapFile['completed_swaps'] = unProcessedSwaps;
-      await _writeData(fileName: 'swaps', data: swapFile);
-    } catch (e, s) {
-      logE(e, stackTrace: s);
-    }
-  }
 
   static Future<void> _syncChatFile() async {
     try {
@@ -502,16 +433,6 @@ class AppGroupSharedService {
           .map((c) => [c.uuid, c.walletId, c.walletType.index, c.name(), c.chatPubKeyBase64, c.picture()])
           .toList();
       await _writeData(fileName: 'chat', data: chatFile);
-    } catch (e, s) {
-      logE(e, stackTrace: s);
-    }
-  }
-
-  static Future<void> _syncBolt12File() async {
-    try {
-      final Map<String, dynamic> bolt12File = {};
-      bolt12File['offers'] = DB.bolt12Offers.values.map((o) => o.toMap()).toList();
-      await _writeData(fileName: 'bolt12', data: bolt12File);
     } catch (e, s) {
       logE(e, stackTrace: s);
     }

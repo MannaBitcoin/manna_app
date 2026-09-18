@@ -1,7 +1,6 @@
-use crate::boltz::types::ApiConfig;
 use crate::nse::util::decrypt_file;
 use crate::nse::{NSEError, NotificationInfo};
-use crate::util::{LiquidWallet, Network};
+use crate::types::{ApiConfig, LiquidWallet, Network};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -13,16 +12,6 @@ pub(super) struct WalletFile {
     pub(super) api_config: ApiConfig,
     pub(super) device_id: String,
     pub(super) bitcoin_display_style: Option<u8>,
-}
-
-impl WalletFile {
-    pub(super) fn get_boltz_url(&self, network: &Network) -> String {
-        match network {
-            Network::Mainnet => self.api_config.mainnet.boltz_url.clone(),
-            Network::Testnet => self.api_config.testnet.boltz_url.clone(),
-            Network::Regtest => self.api_config.regtest.boltz_url.clone(),
-        }
-    }
 }
 
 #[instrument(err, skip_all, fields(network))]

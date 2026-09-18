@@ -9,7 +9,6 @@ import 'package:manna/screens/send_screen.dart';
 import 'package:manna/services/chat_service.dart';
 import 'package:manna/services/db.dart';
 import 'package:manna/services/log_service.dart';
-import 'package:manna/services/transaction_service.dart';
 import 'package:manna/utils/parser.dart';
 import 'package:manna/utils/sats_extension.dart';
 import 'package:manna/utils/state_extension.dart';
@@ -151,14 +150,13 @@ class TextMessageData extends MessageData {
 }
 
 class PayReqMessageData extends MessageData {
-  const PayReqMessageData({required this.address, required this.amount, required this.isSat, required this.memo});
+  const PayReqMessageData({required this.amount, required this.isSat, required this.memo});
 
   static PayReqMessageData? fromMap(Map map) {
     try {
       if (map['content'] is Map) {
         final data = map['content'];
         return PayReqMessageData(
-          address: parseString(data['address']),
           amount: parseDouble(data['amount']),
           isSat: parseBool(data['isSat']),
           memo: parseStringN(data['memo']),
@@ -173,7 +171,6 @@ class PayReqMessageData extends MessageData {
   @override
   final type = MessageDataType.payReq;
 
-  final String address;
   final double amount;
   final bool isSat;
   final String? memo;
@@ -181,7 +178,7 @@ class PayReqMessageData extends MessageData {
   @override
   Map<String, dynamic> toMap() => {
     ...super.toMap(),
-    'content': {'address': address, 'amount': amount, 'isSat': isSat, if (memo != null) 'memo': memo},
+    'content': {'amount': amount, 'isSat': isSat, if (memo != null) 'memo': memo},
   };
 }
 
@@ -210,7 +207,7 @@ sealed class Message {
 }
 
 class TxMessage extends Message {
-  TxMessage(this.tx) : super(tx.txTimestamp);
+  TxMessage(this.tx) : super(tx.timestamp);
   final Transaction tx;
 }
 
@@ -364,66 +361,57 @@ class ChatMessage extends Message {
               style: TextStyle(color: color),
             ),
           ),
-          PayReqMessageData(amount: final amount, address: final address, memo: final memo, isSat: final isSat) =>
-            Builder(
-              builder: (context) {
-                final sats = isSat ? amount.toInt() : amount.fiatToSats(at: timestamp, sourceCurrencyCode: 'usd');
+          PayReqMessageData(amount: final amount, memo: final memo, isSat: final isSat) => Builder(
+            builder: (context) {
+              final sats = isSat ? amount.toInt() : amount.fiatToSats(at: timestamp, sourceCurrencyCode: 'usd');
 
-                void open() {
-                  final bip21Address = TransactionService.createBIP21Address(
-                    address: address,
-                    type: TraType.lbtcToLbtcSend,
-                    amount: sats,
-                    memo: memo ?? '',
-                  );
-                  AppRouter.push(
-                    SendScreen(
-                      address: bip21Address,
-                      contact:
-                          DB.contacts[IdWithWalletAndType(
-                            walletId: selectedWallet.uuid,
-                            walletType: selectedWallet.type,
-                            id: senderId,
-                          )],
-                    ),
-                  );
+              void open() {
+                final contact =
+                    DB.contacts[IdWithWalletAndType(
+                      walletId: selectedWallet.uuid,
+                      walletType: selectedWallet.type,
+                      id: senderId,
+                    )];
+                if (contact != null) {
+                  AppRouter.push(SendScreen(amount: sats, address: contact.lnurl(original: true), contact: contact));
                 }
+              }
 
-                return GestureDetector(
-                  onTap: isSent ? null : open,
-                  child: Column(
-                    crossAxisAlignment: isSent ? .end : .start,
-                    spacing: 6,
-                    children: [
+              return GestureDetector(
+                onTap: isSent ? null : open,
+                child: Column(
+                  crossAxisAlignment: isSent ? .end : .start,
+                  spacing: 6,
+                  children: [
+                    Text(
+                      'Requested ${isSat ? getSatInBitcoinStyle(amount.toInt()) : amount.formatFiat()}',
+                      style: TextStyle(fontSize: 16, color: color),
+                    ),
+                    AmountText(
+                      amountSat: sats,
+                      showFiat: true,
+                      btcStyle: TextStyle(fontSize: 18, color: color, fontWeight: FontWeight.bold),
+                      fiatStyle: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w500),
+                    ),
+                    if (memo?.isNotEmpty ?? false)
                       Text(
-                        'Requested ${isSat ? getSatInBitcoinStyle(amount.toInt()) : amount.formatFiat()}',
-                        style: TextStyle(fontSize: 16, color: color),
+                        memo!,
+                        style: TextStyle(color: color),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      AmountText(
-                        amountSat: sats,
-                        showFiat: true,
-                        btcStyle: TextStyle(fontSize: 18, color: color, fontWeight: FontWeight.bold),
-                        fiatStyle: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w500),
+                    if (!isSent)
+                      ElevatedButton(
+                        onPressed: open,
+                        style: ElevatedButton.styleFrom(visualDensity: VisualDensity.standard),
+                        child: const Text('Pay'),
                       ),
-                      if (memo?.isNotEmpty ?? false)
-                        Text(
-                          memo!,
-                          style: TextStyle(color: color),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      if (!isSent)
-                        ElevatedButton(
-                          onPressed: open,
-                          style: ElevatedButton.styleFrom(visualDensity: VisualDensity.standard),
-                          child: const Text('Pay'),
-                        ),
-                      const SizedBox(height: 12),
-                    ],
-                  ),
-                );
-              },
-            ),
+                    const SizedBox(height: 12),
+                  ],
+                ),
+              );
+            },
+          ),
         },
 
         Positioned(
