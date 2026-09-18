@@ -599,11 +599,10 @@ Future<bool?> migrateDB() async {
     }
 
     if (AppState.prefs.containsKey('isFirstBoot') && !(AppState.prefs.getBool('isMigratedToSpark') ?? false)) {
-      await Hive.initFlutter(dbDir.path);
+      await Hive.initFlutter('manna_data/db');
 
       // delete old tables
-
-      for (final boxToDelete in ['wowallets', 'transactions', 'swaps', 'bolt12Offers']) {
+      for (final boxToDelete in ['wowallets', 'transactions', 'swaps', 'bolt12Offers', 'settingHistoryCache']) {
         await Hive.deleteBoxFromDisk(boxToDelete);
       }
 
@@ -623,6 +622,7 @@ Future<bool?> migrateDB() async {
       await Hive.close();
       await Hive.deleteBoxFromDisk('accounts');
       await Hive.deleteBoxFromDisk('wallets');
+
       registerV2Adapters(force: true);
 
       await (await Hive.openBox<Account>(
@@ -636,6 +636,7 @@ Future<bool?> migrateDB() async {
 
       await Hive.close();
       await AppState.prefs.setBool('isMigratedToSpark', true);
+      await AppState.prefs.setInt('migration', 4);
     }
   } catch (e, s) {
     logE(e, stackTrace: s, showToast: true);
@@ -687,8 +688,8 @@ class WalletV1Adapter extends TypeAdapter<Wallet> {
   @override
   Wallet read(BinaryReader reader) {
     final accountId = reader.readString();
-    final xpub = reader.readString();
     final descriptor = reader.readString();
+    final xpub = reader.readString();
     final network = Network.values[reader.readInt()];
     final type = WalletType.values[reader.readInt()];
     final balance = reader.readInt();

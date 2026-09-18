@@ -85,7 +85,7 @@ class WalletAdapter extends TypeAdapter<Wallet> {
     accountId: reader.readString(),
     xpub: reader.readString(),
     network: Network.values[reader.readInt()],
-    type: WalletType.values[reader.readInt()],
+    type: WalletType.values[reader.readInt().clamp(0, 0)],
     balance: reader.readInt(),
   );
 
@@ -190,7 +190,7 @@ class ContactAdapter extends TypeAdapter<Contact> {
   Contact read(BinaryReader reader) => Contact(
     uuid: reader.readString(),
     walletId: reader.readString(),
-    walletType: WalletType.values[reader.readInt()],
+    walletType: WalletType.values[reader.readInt().clamp(0, 0)],
     name: reader.readString(),
     lnurl: reader.readString(),
     about: reader.read() as String?,

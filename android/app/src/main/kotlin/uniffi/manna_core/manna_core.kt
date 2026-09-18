@@ -808,7 +808,7 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
-    if (lib.uniffi_manna_core_checksum_func_handle_notification() != 50594) {
+    if ((lib.uniffi_manna_core_checksum_func_handle_notification() and 0xFFFF) != 50594) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
 }

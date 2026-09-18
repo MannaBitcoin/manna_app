@@ -95,12 +95,6 @@ class WalletScreenState extends State<WalletScreen> {
 
     conversationSubscription = DB.conversationsBox.watch().listen((_) => update());
 
-    if (!AppState.prefs.containsKey('isFirstBoot')) {
-      AppState.prefs.setBool('isFirstBoot', true);
-    } else {
-      AppState.prefs.setBool('isFirstBoot', false);
-    }
-
     walletBackupReminder();
 
     dragController.addListener(() {
@@ -114,16 +108,16 @@ class WalletScreenState extends State<WalletScreen> {
     });
 
     Future(() {
-      if (!AppState.prefs.containsKey('didUserKnowLiquidWalletIsMoved')) {
+      if (!AppState.prefs.containsKey('didUserKnowLiquidWalletIsMoved') && AppState.prefs.containsKey('isFirstBoot')) {
         postFrameCallBack(() {
           showDialog(
             context: context,
             builder: (context) => AlertDialog(
-              title: const Text('Manna is now spark wallet'),
+              title: const Text('Manna is now Spark Wallet'),
               content: Text.rich(
                 TextSpan(
                   text:
-                      'Spark is a layer 2 protocol that makes lightning payments hassle fee while maintaining self custody of funds.\nDo not worry you old wallet is still accessible ',
+                      "Spark is a Layer 2 protocol that makes Lightning payments hassle-free while maintaining self-custody of your funds. Don't worry—your old wallet is still accessible ",
                   children: [
                     TextSpan(
                       text: '[here]',
@@ -137,7 +131,7 @@ class WalletScreenState extends State<WalletScreen> {
                     ),
                     const TextSpan(
                       text:
-                          '.\nIf you want to spend you old L-BTC, you can import the seed phrase of the wallet to any other liquid compatible apps (Blockstream Green, Bull bitcoin).',
+                          ".\nIf you want to spend your old L-BTC, you can import your wallet's seed phrase into any Liquid-compatible app (such as Blockstream Green or Bull Bitcoin).",
                     ),
                   ],
                 ),
@@ -154,6 +148,12 @@ class WalletScreenState extends State<WalletScreen> {
             ),
           );
         });
+      }
+
+      if (!AppState.prefs.containsKey('isFirstBoot')) {
+        AppState.prefs.setBool('isFirstBoot', true);
+      } else {
+        AppState.prefs.setBool('isFirstBoot', false);
       }
     });
 
