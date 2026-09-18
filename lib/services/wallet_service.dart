@@ -45,6 +45,7 @@ import 'package:manna/services/chat_service.dart';
 import 'package:manna/services/connectivity_checker.dart';
 import 'package:manna/services/db.dart';
 import 'package:manna/services/db_service.dart';
+import 'package:manna/services/deposit_claim_service.dart';
 import 'package:manna/services/log_service.dart';
 import 'package:manna/services/nostr_service.dart';
 import 'package:manna/utils/de_bouncer.dart';
@@ -174,6 +175,7 @@ class WalletService {
       final sdk = await builder.build();
 
       sparkNodes[w.xpub] = (sdk, sdk.addEventListener().map((event) => (w.uuid, event)).listen(_onEvent));
+      unawaited(DepositClaimService.refresh(xpub: w.xpub));
 
       if (waitForSync) await sync(xpub: xpub);
       if (!NewReceivedTxService.shouldShowBottomSheet) {
@@ -194,6 +196,7 @@ class WalletService {
         final xpub = DB.allWallets.where((e) => e.uuid == walletId).firstOrNull?.xpub;
         if (xpub != null) {
           await partialSync(xpub: xpub);
+          DepositClaimService.scheduleRefresh(xpub: xpub);
         }
       case SdkEvent_PaymentSucceeded(:final payment):
         if (payment.paymentType == PaymentType.receive) {
@@ -209,10 +212,13 @@ class WalletService {
         logD('SdkEvent_PaymentFailed ${payment.id}');
       case SdkEvent_ClaimedDeposits(:final claimedDeposits):
         logD('SdkEvent_ClaimedDeposits ${claimedDeposits.map((e) => e.txid)}');
+        unawaited(DepositClaimService.onClaimedDeposits(walletId: walletId, deposits: claimedDeposits));
       case SdkEvent_NewDeposits(:final newDeposits):
         logD('SdkEvent_NewDeposits ${newDeposits.map((e) => e.txid)}');
+        unawaited(DepositClaimService.onNewDeposits(walletId: walletId, deposits: newDeposits));
       case SdkEvent_UnclaimedDeposits(:final unclaimedDeposits):
         logD('SdkEvent_UnclaimedDeposits ${unclaimedDeposits.map((e) => e.txid)}');
+        unawaited(DepositClaimService.onUnclaimedDeposits(walletId: walletId, deposits: unclaimedDeposits));
       case SdkEvent_AutoOptimization(:final optimizationEvent):
         switch (optimizationEvent) {
           case AutoOptimizationEvent_Started():
@@ -388,6 +394,7 @@ class WalletService {
     sparkNodes[xpub]?.$1.dispose();
     sparkNodes.remove(xpub);
     syncMutex.remove(xpub);
+    DepositClaimService.clear(xpub: xpub);
   }
 
   static Future<bool> deleteAccount(String accountId) async {

@@ -3,7 +3,7 @@ import 'package:manna/services/chat_service.dart';
 import 'package:manna/services/db_service.dart';
 import 'services/log_service.dart';
 
-enum GlobalStream { account, receivedTx }
+enum GlobalStream { account, receivedTx, deposits }
 
 class GlobalListener {
   // This class allows us to push updates to any part of the app from anywhere,

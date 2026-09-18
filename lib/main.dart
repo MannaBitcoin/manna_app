@@ -19,11 +19,13 @@ import 'package:manna/globals.dart';
 import 'package:manna/router.dart';
 import 'package:manna/screens/menu_screen.dart';
 import 'package:manna/screens/splash_screen.dart';
+import 'package:manna/screens/unclaimed_deposits_screen.dart';
 import 'package:manna/services/chat_service.dart';
 import 'package:manna/services/connectivity_checker.dart';
 import 'package:manna/services/db.dart';
 import 'package:manna/services/db_service.dart';
 import 'package:manna/services/deep_link_service.dart';
+import 'package:manna/services/deposit_claim_service.dart';
 import 'package:manna/services/jwt_service.dart';
 import 'package:manna/services/nfc_service.dart';
 import 'package:manna/services/notification_service.dart';
@@ -211,6 +213,16 @@ class MannaAppState extends State<MannaApp> with WidgetsBindingObserver {
         return true;
       },
     );
+    GlobalListener.addListener(
+      stream: .deposits,
+      listenerName: 'main-deposits',
+      callback: (data) {
+        if (data is List<TrackedDeposit>) {
+          promptUnclaimedDeposits(data);
+        }
+        return true;
+      },
+    );
     super.initState();
   }
 
@@ -219,6 +231,7 @@ class MannaAppState extends State<MannaApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
 
     GlobalListener.removeListener(stream: .receivedTx, listenerName: 'main');
+    GlobalListener.removeListener(stream: .deposits, listenerName: 'main-deposits');
     listener?.dispose();
     connectivitySub?.cancel();
     super.dispose();

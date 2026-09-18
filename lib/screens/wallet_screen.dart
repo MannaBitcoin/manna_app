@@ -19,6 +19,7 @@ import 'package:manna/screens/receive_screen.dart';
 import 'package:manna/screens/send_screen.dart';
 import 'package:manna/screens/shop_screen.dart';
 import 'package:manna/screens/trade_screen.dart';
+import 'package:manna/screens/unclaimed_deposits_screen.dart';
 import 'package:manna/screens/wallet_management_screen.dart';
 import 'package:manna/services/db.dart';
 import 'package:manna/services/deep_link_service.dart';
@@ -424,6 +425,10 @@ class WalletScreenState extends State<WalletScreen> {
                                     ServiceStatus.operational => throw UnimplementedError(),
                                     ServiceStatus.unknown => throw UnimplementedError(),
                                   }),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: UnclaimedDepositsBanner(xpub: currentWallet.xpub, lightOnDark: true),
+                                ),
                               ],
                             ),
                           ),

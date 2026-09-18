@@ -51,10 +51,12 @@ void logE(dynamic d, {StackTrace? stackTrace, dynamic data, String? title, Strin
       SdkError_NetworkError(:final field0) => field0,
       SdkError_StorageError(:final field0) => field0,
       SdkError_ChainServiceError(:final field0) => field0,
-      SdkError_MaxDepositClaimFeeExceeded() => 'Maximum deposit claim fee exceeded',
+      SdkError_MaxDepositClaimFeeExceeded(:final requiredFeeSats) =>
+        'Claim fee of $requiredFeeSats sats exceeds the automatic limit',
       SdkError_MissingUtxo() => 'UTXO not found',
-      SdkError_DepositClaimInProgress() => 'Deposit claim is already in progress',
-      SdkError_RefundReplacementFeeTooLow() => 'Fee for refund tx is too low',
+      SdkError_DepositClaimInProgress() => 'This deposit is already being claimed. Please wait.',
+      SdkError_RefundReplacementFeeTooLow(:final requiredFeeSats) =>
+        'Refund fee is too low. At least $requiredFeeSats sats is required to replace it.',
       SdkError_LnurlError(:final field0) => field0,
       SdkError_Signer(:final field0) => field0,
       SdkError_OptimizationAlreadyRunning() => 'Leaf optimisation is already in progress',

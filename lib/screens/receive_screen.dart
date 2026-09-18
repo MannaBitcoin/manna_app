@@ -12,6 +12,7 @@ import 'package:manna/globals.dart';
 import 'package:manna/models/account.dart';
 import 'package:manna/router.dart';
 import 'package:manna/screens/account_detail_screen.dart';
+import 'package:manna/screens/unclaimed_deposits_screen.dart';
 import 'package:manna/services/clipboard_service.dart';
 import 'package:manna/services/db.dart';
 import 'package:manna/services/db_service.dart';
@@ -301,6 +302,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> with SingleTickerProvider
           spacing: 8,
           mainAxisSize: MainAxisSize.min,
           children: [
+            UnclaimedDepositsBanner(xpub: selectedWallet.xpub),
             if (qrData != null) qrWidget(qrData),
             if (lastBtcQrConfig != null) ...amountNoteWidget(lastBtcQrConfig!.amount, lastBtcQrConfig!.memo),
             if (qrData != null) buttons(qrData),
