@@ -28,7 +28,6 @@ void registerV2Adapters({bool force = false}) {
   Hive.registerAdapter(MapCommentAdapter(), override: true);
   Hive.registerAdapter(ChatConversationAdapter(), override: true);
   Hive.registerAdapter(MessageLogAdapter(), override: true);
-  // Hive.registerAdapter(SparkPaymentAdaptor(), override: true);
 
   Hive.registerAdapter(OutPointAdapter(), override: true);
   Hive.registerAdapter(TxOutSecretsAdapter(), override: true);
@@ -56,7 +55,6 @@ class AccountAdapter extends TypeAdapter<Account> {
     isDisabled: reader.readBool(),
     isBackedUp: reader.readBool(),
     isSendAnonymously: reader.readBool(),
-    isSendNotification: reader.readBool(),
     sortOrder: reader.readInt(),
     chatKeyPair: reader.read() as KeyPair?,
     nsec: reader.read() as String?,
@@ -71,7 +69,6 @@ class AccountAdapter extends TypeAdapter<Account> {
     writer.writeBool(obj.isDisabled);
     writer.writeBool(obj.isBackedUp);
     writer.writeBool(obj.isSendAnonymously);
-    writer.writeBool(obj.isSendNotification);
     writer.writeInt(obj.sortOrder);
     writer.write(obj.chatKeyPair);
     writer.write(obj.nsec);

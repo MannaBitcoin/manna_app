@@ -189,7 +189,7 @@ class TransactionCard extends StatelessWidget {
                   : AmountText(
                       amountSat:
                           // exchangeOrder?.cryptoAmount ??
-                          tx.inner.amount.i,
+                          isIncoming ? tx.inner.amount.i : tx.inner.amount.i + tx.inner.fees.i,
                       btcStyle: const TextStyle(fontSize: 20),
                       showFiat: true,
                       isIncoming: isIncoming,

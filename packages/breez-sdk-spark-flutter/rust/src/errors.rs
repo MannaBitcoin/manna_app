@@ -1,0 +1,98 @@
+pub use breez_sdk_spark::passkey::{PasskeyError, PrfProviderError};
+pub use breez_sdk_spark::{DepositClaimError, Fee, SdkError, StorageError};
+use flutter_rust_bridge::frb;
+
+#[frb(mirror(DepositClaimError))]
+pub enum _DepositClaimError {
+    MaxDepositClaimFeeExceeded {
+        tx: String,
+        vout: u32,
+        max_fee: Option<Fee>,
+        required_fee_sats: u64,
+        required_fee_rate_sat_per_vbyte: u64,
+    },
+    MissingUtxo {
+        tx: String,
+        vout: u32,
+    },
+    Generic {
+        message: String,
+    },
+}
+
+#[frb(mirror(SdkError))]
+pub enum _SdkError {
+    SparkError(String),
+    InsufficientFunds {
+        token_identifier: Option<String>,
+    },
+    InvalidUuid(String),
+    InvalidInput(String),
+    NetworkError(String),
+    StorageError(String),
+    ChainServiceError(String),
+    MaxDepositClaimFeeExceeded {
+        tx: String,
+        vout: u32,
+        max_fee: Option<Fee>,
+        required_fee_sats: u64,
+        required_fee_rate_sat_per_vbyte: u64,
+    },
+    MissingUtxo {
+        tx: String,
+        vout: u32,
+    },
+    DepositClaimInProgress {
+        tx: String,
+        vout: u32,
+    },
+    RefundReplacementFeeTooLow {
+        pending_fee_sats: u64,
+        required_fee_sats: u64,
+    },
+    LnurlError(String),
+    Signer(String),
+    OptimizationAlreadyRunning,
+    OptimizationCancelled,
+    InsufficientCpfpFunds { required_sat: u64 },
+    Generic(String),
+}
+
+#[frb(mirror(StorageError))]
+pub enum _StorageError {
+    Connection(String),
+    Implementation(String),
+    InitializationError(String),
+    Serialization(String),
+}
+
+#[frb(mirror(PrfProviderError))]
+pub enum _PrfProviderError {
+    PrfNotSupported,
+    UserCancelled,
+    UserTimedOut,
+    CredentialNotFound(String),
+    AuthenticationFailed(String),
+    PrfEvaluationFailed(String),
+    Configuration(String),
+    CredentialAlreadyExists(String),
+    Generic(String),
+}
+
+#[frb(mirror(PasskeyError))]
+pub enum _PasskeyError {
+    Prf(PrfProviderError),
+    RelayConnectionFailed(String),
+    NostrWriteFailed(String),
+    NostrReadFailed(String),
+    KeyDerivationError(String),
+    InvalidPrfOutput(String),
+    MnemonicError(String),
+    InvalidSalt(String),
+    CreatedButNotDerived {
+        credential_id: Vec<u8>,
+        source: PrfProviderError,
+    },
+    InvalidConfig(String),
+    Generic(String),
+}

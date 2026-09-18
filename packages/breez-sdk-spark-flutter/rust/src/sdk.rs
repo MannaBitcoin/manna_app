@@ -1,0 +1,460 @@
+use std::sync::Arc;
+
+use breez_sdk_spark::*;
+use flutter_rust_bridge::{DartFnFuture, frb};
+
+use crate::events::BindingEventListener;
+use crate::exit_signer::CallbackCpfpSigner;
+use crate::frb_generated::StreamSink;
+use crate::logger::BindingLogger;
+
+pub async fn get_spark_status(
+    request: GetSparkStatusRequest,
+) -> Result<SparkStatus, SdkError> {
+    breez_sdk_spark::get_spark_status(request).await
+}
+
+pub async fn connect(request: ConnectRequest) -> Result<BreezSdk, SdkError> {
+    let sdk = breez_sdk_spark::connect(request).await?;
+    Ok(BreezSdk {
+        inner: Arc::new(sdk),
+    })
+}
+
+#[frb(sync)]
+pub fn default_config(network: Network) -> Config {
+    breez_sdk_spark::default_config(network)
+}
+
+#[frb(sync)]
+pub fn default_server_config(network: Network) -> Config {
+    breez_sdk_spark::default_server_config(network)
+}
+
+#[frb(sync)]
+pub fn init_logging(
+    log_dir: Option<String>,
+    app_logger: StreamSink<LogEntry>,
+    log_filter: Option<String>,
+) -> Result<(), SdkError> {
+    let app_logger: Box<dyn Logger> = Box::new(BindingLogger { logger: app_logger });
+    breez_sdk_spark::init_logging(log_dir, Some(app_logger), log_filter)
+}
+
+pub struct BreezSdk {
+    pub(crate) inner: Arc<breez_sdk_spark::BreezSdk>,
+}
+
+impl BreezSdk {
+    pub async fn add_event_listener(&self, listener: StreamSink<SdkEvent>) -> String {
+        self.inner
+            .add_event_listener(Box::new(BindingEventListener { listener }))
+            .await
+    }
+
+    pub async fn remove_event_listener(&self, id: &str) -> bool {
+        self.inner.remove_event_listener(id).await
+    }
+
+    pub async fn disconnect(&self) -> Result<(), SdkError> {
+        self.inner.disconnect().await
+    }
+
+    pub async fn parse(&self, input: &str) -> Result<InputType, SdkError> {
+        self.inner.parse(input).await
+    }
+
+    pub async fn get_cross_chain_routes(
+        &self,
+        filter: CrossChainRouteFilter,
+    ) -> Result<Vec<CrossChainRoutePair>, SdkError> {
+        self.inner.get_cross_chain_routes(&filter).await
+    }
+
+    pub async fn get_info(&self, request: GetInfoRequest) -> Result<GetInfoResponse, SdkError> {
+        self.inner.get_info(request).await
+    }
+
+    /// Quotes a unilateral exit: which leaves would exit, the exact fee, and how
+    /// much to fund.
+    pub async fn prepare_unilateral_exit(
+        &self,
+        request: PrepareUnilateralExitRequest,
+    ) -> Result<PrepareUnilateralExitResponse, SdkError> {
+        self.inner.prepare_unilateral_exit(request).await
+    }
+
+    /// Builds and signs the unilateral exit from a quote and the actual funding
+    /// UTXOs, signing the CPFP inputs with the built-in single-key signer: pass
+    /// the funding inputs' secret key bytes as `signer_secret_key`. To sign with
+    /// a custom scheme (custom scripts, multisig, a hardware wallet, or keeping
+    /// key material out of the SDK), use [`Self::unilateral_exit_with_signer`].
+    pub async fn unilateral_exit(
+        &self,
+        request: UnilateralExitRequest,
+        signer_secret_key: Vec<u8>,
+    ) -> Result<UnilateralExitResponse, SdkError> {
+        let signer = breez_sdk_spark::signer::SingleKeySigner::new(signer_secret_key)
+            .map_err(|e| SdkError::Generic(format!("Invalid signer key: {e}")))?;
+        self.inner.unilateral_exit(request, Arc::new(signer)).await
+    }
+
+    /// Reads an exit you kept back against the chain: which of its transactions
+    /// are now in a block, and whether it can still be finished as it stands.
+    pub async fn check_unilateral_exit(
+        &self,
+        request: CheckUnilateralExitRequest,
+    ) -> Result<CheckUnilateralExitResponse, SdkError> {
+        self.inner.check_unilateral_exit(request).await
+    }
+
+    /// Builds and signs the unilateral exit with a caller-provided signer. The
+    /// `sign_psbt` callback receives the serialized CPFP PSBT, signs the inputs
+    /// that are not already finalized with any scheme (custom scripts, multisig,
+    /// a hardware wallet), and returns the serialized signed PSBT; a throw
+    /// surfaces as an error. For a single funding key, prefer
+    /// [`Self::unilateral_exit`].
+    pub async fn unilateral_exit_with_signer(
+        &self,
+        request: UnilateralExitRequest,
+        sign_psbt: impl Fn(Vec<u8>) -> DartFnFuture<anyhow::Result<Vec<u8>>>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Result<UnilateralExitResponse, SdkError> {
+        let signer = Arc::new(CallbackCpfpSigner {
+            sign_psbt: Arc::new(sign_psbt),
+        });
+        self.inner.unilateral_exit(request, signer).await
+    }
+
+    /// Serializes everything needed to unilaterally exit this wallet's funds
+    /// while the Spark operators are unreachable, so it can be kept somewhere
+    /// the wallet's own storage cannot take with it.
+    pub async fn export_unilateral_exit_state(
+        &self,
+    ) -> Result<ExportUnilateralExitStateResponse, SdkError> {
+        self.inner.export_unilateral_exit_state().await
+    }
+
+    /// Merges a previously exported exit state back into the wallet, without
+    /// contacting the Spark operators.
+    pub async fn import_unilateral_exit_state(
+        &self,
+        request: ImportUnilateralExitStateRequest,
+    ) -> Result<ImportUnilateralExitStateResponse, SdkError> {
+        self.inner.import_unilateral_exit_state(request).await
+    }
+
+    pub async fn receive_payment(
+        &self,
+        request: ReceivePaymentRequest,
+    ) -> Result<ReceivePaymentResponse, SdkError> {
+        self.inner.receive_payment(request).await
+    }
+
+    pub async fn claim_htlc_payment(
+        &self,
+        request: ClaimHtlcPaymentRequest,
+    ) -> Result<ClaimHtlcPaymentResponse, SdkError> {
+        self.inner.claim_htlc_payment(request).await
+    }
+
+    pub async fn prepare_lnurl_pay(
+        &self,
+        request: PrepareLnurlPayRequest,
+    ) -> Result<PrepareLnurlPayResponse, SdkError> {
+        self.inner.prepare_lnurl_pay(request).await
+    }
+
+    pub async fn lnurl_pay(&self, request: LnurlPayRequest) -> Result<LnurlPayResponse, SdkError> {
+        self.inner.lnurl_pay(request).await
+    }
+
+    pub async fn build_unsigned_lnurl_pay_package(
+        &self,
+        request: BuildUnsignedLnurlPayPackageRequest,
+    ) -> Result<UnsignedTransferPackage, SdkError> {
+        self.inner.build_unsigned_lnurl_pay_package(request).await
+    }
+
+    pub async fn publish_signed_lnurl_pay_package(
+        &self,
+        request: PublishSignedLnurlPayPackageRequest,
+    ) -> Result<PublishSignedLnurlPayResponse, SdkError> {
+        self.inner.publish_signed_lnurl_pay_package(request).await
+    }
+
+    pub async fn lnurl_withdraw(
+        &self,
+        request: LnurlWithdrawRequest,
+    ) -> Result<LnurlWithdrawResponse, SdkError> {
+        self.inner.lnurl_withdraw(request).await
+    }
+
+    pub async fn lnurl_auth(
+        &self,
+        request_data: LnurlAuthRequestDetails,
+    ) -> Result<LnurlCallbackStatus, SdkError> {
+        self.inner.lnurl_auth(request_data).await
+    }
+
+    pub async fn prepare_send_payment(
+        &self,
+        request: PrepareSendPaymentRequest,
+    ) -> Result<PrepareSendPaymentResponse, SdkError> {
+        self.inner.prepare_send_payment(request).await
+    }
+
+    pub async fn build_unsigned_transfer_package(
+        &self,
+        request: BuildUnsignedTransferPackageRequest,
+    ) -> Result<UnsignedTransferPackage, SdkError> {
+        self.inner.build_unsigned_transfer_package(request).await
+    }
+
+    pub async fn send_payment(
+        &self,
+        request: SendPaymentRequest,
+    ) -> Result<SendPaymentResponse, SdkError> {
+        self.inner.send_payment(request).await
+    }
+
+    pub async fn prepare_send_batch(
+        &self,
+        request: PrepareSendBatchRequest,
+    ) -> Result<PrepareSendBatchResponse, SdkError> {
+        self.inner.prepare_send_batch(request).await
+    }
+
+    pub async fn send_batch(
+        &self,
+        request: SendBatchRequest,
+    ) -> Result<SendBatchResponse, SdkError> {
+        self.inner.send_batch(request).await
+    }
+
+    pub async fn build_unsigned_batch_package(
+        &self,
+        request: BuildUnsignedBatchPackageRequest,
+    ) -> Result<UnsignedTransferPackage, SdkError> {
+        self.inner.build_unsigned_batch_package(request).await
+    }
+
+    pub async fn publish_signed_transfer_package(
+        &self,
+        request: PublishSignedTransferPackageRequest,
+    ) -> Result<PublishSignedTransferPackageResponse, SdkError> {
+        self.inner.publish_signed_transfer_package(request).await
+    }
+
+    pub async fn sync_wallet(
+        &self,
+        request: SyncWalletRequest,
+    ) -> Result<SyncWalletResponse, SdkError> {
+        self.inner.sync_wallet(request).await
+    }
+
+    pub async fn list_payments(
+        &self,
+        request: ListPaymentsRequest,
+    ) -> Result<ListPaymentsResponse, SdkError> {
+        self.inner.list_payments(request).await
+    }
+
+    pub async fn get_payment(
+        &self,
+        request: GetPaymentRequest,
+    ) -> Result<GetPaymentResponse, SdkError> {
+        self.inner.get_payment(request).await
+    }
+
+    pub async fn claim_deposit(
+        &self,
+        request: ClaimDepositRequest,
+    ) -> Result<ClaimDepositResponse, SdkError> {
+        self.inner.claim_deposit(request).await
+    }
+
+    pub async fn fetch_claim_deposit_quote(
+        &self,
+        request: FetchClaimDepositQuoteRequest,
+    ) -> Result<FetchClaimDepositQuoteResponse, SdkError> {
+        self.inner.fetch_claim_deposit_quote(request).await
+    }
+
+    pub async fn refund_deposit(
+        &self,
+        request: RefundDepositRequest,
+    ) -> Result<RefundDepositResponse, SdkError> {
+        self.inner.refund_deposit(request).await
+    }
+
+    pub async fn list_unclaimed_deposits(
+        &self,
+        request: ListUnclaimedDepositsRequest,
+    ) -> Result<ListUnclaimedDepositsResponse, SdkError> {
+        self.inner.list_unclaimed_deposits(request).await
+    }
+
+    pub async fn check_lightning_address_available(
+        &self,
+        request: CheckLightningAddressRequest,
+    ) -> Result<bool, SdkError> {
+        self.inner.check_lightning_address_available(request).await
+    }
+
+    pub async fn get_lightning_address(&self) -> Result<Option<LightningAddressInfo>, SdkError> {
+        self.inner.get_lightning_address().await
+    }
+
+    pub async fn register_lightning_address(
+        &self,
+        request: RegisterLightningAddressRequest,
+    ) -> Result<LightningAddressInfo, SdkError> {
+        self.inner.register_lightning_address(request).await
+    }
+
+    pub async fn authorize_lightning_address_transfer(
+        &self,
+        request: AuthorizeTransferRequest,
+    ) -> Result<TransferAuthorization, SdkError> {
+        self.inner
+            .authorize_lightning_address_transfer(request)
+            .await
+    }
+
+    pub async fn claim_lightning_address_transfer(
+        &self,
+        request: ClaimTransferRequest,
+    ) -> Result<LightningAddressInfo, SdkError> {
+        self.inner.claim_lightning_address_transfer(request).await
+    }
+
+    pub async fn delete_lightning_address(&self) -> Result<(), SdkError> {
+        self.inner.delete_lightning_address().await
+    }
+
+    pub async fn list_fiat_currencies(&self) -> Result<ListFiatCurrenciesResponse, SdkError> {
+        self.inner.list_fiat_currencies().await
+    }
+
+    pub async fn list_fiat_rates(&self) -> Result<ListFiatRatesResponse, SdkError> {
+        self.inner.list_fiat_rates().await
+    }
+
+    pub async fn recommended_fees(&self) -> Result<RecommendedFees, SdkError> {
+        self.inner.recommended_fees().await
+    }
+
+    pub async fn get_tokens_metadata(
+        &self,
+        request: GetTokensMetadataRequest,
+    ) -> Result<GetTokensMetadataResponse, SdkError> {
+        self.inner.get_tokens_metadata(request).await
+    }
+
+    pub async fn sign_message(
+        &self,
+        request: SignMessageRequest,
+    ) -> Result<SignMessageResponse, SdkError> {
+        self.inner.sign_message(request).await
+    }
+
+    pub async fn check_message(
+        &self,
+        request: CheckMessageRequest,
+    ) -> Result<CheckMessageResponse, SdkError> {
+        self.inner.check_message(request).await
+    }
+
+    pub async fn get_user_settings(&self) -> Result<UserSettings, SdkError> {
+        self.inner.get_user_settings().await
+    }
+
+    pub async fn update_user_settings(
+        &self,
+        request: UpdateUserSettingsRequest,
+    ) -> Result<(), SdkError> {
+        self.inner.update_user_settings(request).await
+    }
+
+    #[frb(sync)]
+    pub fn get_token_issuer(&self) -> crate::issuer::TokenIssuer {
+        let token_issuer = self.inner.get_token_issuer();
+        crate::issuer::TokenIssuer {
+            token_issuer: Arc::new(token_issuer),
+        }
+    }
+
+    pub async fn optimize_leaves(
+        &self,
+        request: OptimizeLeavesRequest,
+    ) -> Result<OptimizeLeavesResponse, SdkError> {
+        self.inner.optimize_leaves(request).await
+    }
+
+    pub async fn fetch_conversion_limits(
+        &self,
+        request: FetchConversionLimitsRequest,
+    ) -> Result<FetchConversionLimitsResponse, SdkError> {
+        self.inner.fetch_conversion_limits(request).await
+    }
+
+    pub async fn buy_bitcoin(
+        &self,
+        request: BuyBitcoinRequest,
+    ) -> Result<BuyBitcoinResponse, SdkError> {
+        self.inner.buy_bitcoin(request).await
+    }
+
+    pub async fn prepare_payment_link(
+        &self,
+        request: PreparePaymentLinkRequest,
+    ) -> Result<PreparePaymentLinkResponse, SdkError> {
+        self.inner.prepare_payment_link(request).await
+    }
+
+    pub async fn register_webhook(
+        &self,
+        request: RegisterWebhookRequest,
+    ) -> Result<RegisterWebhookResponse, SdkError> {
+        self.inner.register_webhook(request).await
+    }
+
+    pub async fn unregister_webhook(
+        &self,
+        request: UnregisterWebhookRequest,
+    ) -> Result<(), SdkError> {
+        self.inner.unregister_webhook(request).await
+    }
+
+    pub async fn list_webhooks(&self) -> Result<Vec<Webhook>, SdkError> {
+        self.inner.list_webhooks().await
+    }
+
+    pub async fn refund_pending_conversions(
+        &self,
+    ) -> Result<RefundPendingConversionsResponse, SdkError> {
+        self.inner.refund_pending_conversions().await
+    }
+
+    pub async fn add_contact(&self, request: AddContactRequest) -> Result<Contact, SdkError> {
+        self.inner.add_contact(request).await
+    }
+
+    pub async fn update_contact(&self, request: UpdateContactRequest) -> Result<Contact, SdkError> {
+        self.inner.update_contact(request).await
+    }
+
+    pub async fn delete_contact(&self, id: String) -> Result<(), SdkError> {
+        self.inner.delete_contact(id).await
+    }
+
+    pub async fn list_contacts(
+        &self,
+        request: ListContactsRequest,
+    ) -> Result<Vec<Contact>, SdkError> {
+        self.inner.list_contacts(request).await
+    }
+}

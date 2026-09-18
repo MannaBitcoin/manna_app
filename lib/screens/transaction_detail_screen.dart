@@ -339,7 +339,9 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> with 
                               ),
                             ),
                             AmountText(
-                              amountSat: tx.inner.amount.i + tx.inner.fees.i,
+                              amountSat: tx.inner.paymentType == PaymentType.receive
+                                  ? tx.inner.amount.i
+                                  : tx.inner.amount.i + tx.inner.fees.i,
                               btcStyle: const TextStyle(
                                 fontSize: 36,
                                 fontWeight: FontWeight.w700,
@@ -430,12 +432,17 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> with 
                                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                                 ),
                                 children: [
-                                  if (tx.inner.paymentType == PaymentType.send)
-                                    _detailRow(
-                                      Icons.account_balance_wallet,
-                                      'Actual Amount',
-                                      AmountText(showFiat: true, amountSat: tx.inner.amount.i, atTime: tx.timestamp),
+                                  _detailRow(
+                                    Icons.account_balance_wallet,
+                                    'Actual Amount',
+                                    AmountText(
+                                      showFiat: true,
+                                      amountSat: tx.inner.paymentType == PaymentType.send
+                                          ? tx.inner.amount.i
+                                          : tx.inner.amount.i + tx.inner.fees.i,
+                                      atTime: tx.timestamp,
                                     ),
+                                  ),
 
                                   _detailRow(
                                     Icons.toll,

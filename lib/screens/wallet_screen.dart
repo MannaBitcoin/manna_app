@@ -14,6 +14,7 @@ import 'package:manna/router.dart';
 import 'package:manna/screens/all_transaction_screen.dart';
 import 'package:manna/screens/backup_reminder_screen.dart';
 import 'package:manna/screens/contact_screen.dart';
+import 'package:manna/screens/liquid_wallet_screen.dart';
 import 'package:manna/screens/menu_screen.dart';
 import 'package:manna/screens/receive_screen.dart';
 import 'package:manna/screens/send_screen.dart';
@@ -110,6 +111,50 @@ class WalletScreenState extends State<WalletScreen> {
 
     Future(() async {
       sparkStatus = (await getSparkStatus(request: const GetSparkStatusRequest())).status;
+    });
+
+    Future(() {
+      if (!AppState.prefs.containsKey('didUserKnowLiquidWalletIsMoved')) {
+        postFrameCallBack(() {
+          showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Manna is now spark wallet'),
+              content: Text.rich(
+                TextSpan(
+                  text:
+                      'Spark is a layer 2 protocol that makes lightning payments hassle fee while maintaining self custody of funds.\nDo not worry you old wallet is still accessible ',
+                  children: [
+                    TextSpan(
+                      text: '[here]',
+                      style: TextStyle(
+                        decoration: TextDecoration.underline,
+                        color: Colors.blue.shade600,
+                        decorationColor: Colors.blue.shade600,
+                      ),
+                      recognizer: TapGestureRecognizer()
+                        ..onTap = () => AppRouter.push(LiquidWalletScreen(wallet: selectedWallet)),
+                    ),
+                    const TextSpan(
+                      text:
+                          '.\nIf you want to spend you old L-BTC, you can import the seed phrase of the wallet to any other liquid compatible apps (Blockstream Green, Bull bitcoin).',
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  child: const Text('Acknowledge'),
+                  onPressed: () {
+                    AppRouter.pop();
+                    AppState.prefs.setBool('didUserKnowLiquidWalletIsMoved', true);
+                  },
+                ),
+              ],
+            ),
+          );
+        });
+      }
     });
 
     super.initState();

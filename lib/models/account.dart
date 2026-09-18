@@ -51,7 +51,6 @@ class Account {
     required this.isDisabled,
     required this.isBackedUp,
     required this.isSendAnonymously,
-    required this.isSendNotification,
     required this.sortOrder,
     String? mnemonicSentence,
     this.chatKeyPair,
@@ -76,7 +75,6 @@ class Account {
       isDisabled: parseBool(map['isDisabled']),
       isBackedUp: parseBool(map['isBackedUp']),
       isSendAnonymously: parseBool(map['isSendAnonymously']),
-      isSendNotification: parseBool(map['isSendNotification']),
       sortOrder: parseInt(map['sortOrder']),
       mnemonicSentence: mnemonics?.sentence,
       chatKeyPair: mnemonics == null ? null : await Account.generateChatKeyPair(mnemonics),
@@ -91,7 +89,6 @@ class Account {
   bool isDisabled;
   bool isBackedUp;
   bool isSendAnonymously;
-  bool isSendNotification;
   int sortOrder;
 
   // only for accounts with mnemonic, not for watch only wallets
@@ -121,7 +118,6 @@ class Account {
     bool? isDisabled,
     bool? isBackedUp,
     bool? isSendAnonymously,
-    bool? isSendNotification,
     int? sortOrder,
   }) {
     this.name = name ?? this.name;
@@ -129,7 +125,6 @@ class Account {
     this.isDisabled = isDisabled ?? this.isDisabled;
     this.isBackedUp = isBackedUp ?? this.isBackedUp;
     this.isSendAnonymously = isSendAnonymously ?? this.isSendAnonymously;
-    this.isSendNotification = isSendNotification ?? this.isSendNotification;
     this.sortOrder = sortOrder ?? this.sortOrder;
     return save();
   }
@@ -150,7 +145,6 @@ class Account {
     'isDisabled': isDisabled,
     'isBackedUp': isBackedUp,
     'isSendAnonymously': isSendAnonymously,
-    'isSendNotification': isSendNotification,
     'sortOrder': sortOrder,
   };
 

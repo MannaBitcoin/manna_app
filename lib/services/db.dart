@@ -31,7 +31,7 @@ import 'package:manna/services/log_service.dart';
 import 'package:manna/services/secure_storage.dart';
 import 'package:manna/utils/parser.dart';
 import 'package:manna/utils/toast_service.dart';
-import 'package:manna_core/manna_core.dart' show WalletType, Network;
+import 'package:manna_core/manna_core.dart' show WalletType, Network, KeyPair;
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 
@@ -525,8 +525,8 @@ Future<bool?> migrateDB() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   final migrationVersion = AppState.prefs.getInt('migration');
-  if (migrationVersion == null || migrationVersion >= 3) {
-    await AppState.prefs.setInt('migration', 3);
+  if (migrationVersion == null || migrationVersion >= 4) {
+    await AppState.prefs.setInt('migration', 4);
     return null;
   }
 
@@ -546,7 +546,7 @@ Future<bool?> migrateDB() async {
 
       final archive = Archive();
       for (final entity in dbDir.listSync()) {
-        if (entity is File && !entity.path.endsWith('.zip')) {
+        if (entity is File && (entity.path.endsWith('.hive') || entity.path.endsWith('.lock'))) {
           final bytes = await entity.readAsBytes();
           archive.addFile(ArchiveFile(path.basename(entity.path), bytes.length, bytes));
         }
@@ -598,10 +598,44 @@ Future<bool?> migrateDB() async {
       return null;
     }
 
-    await Hive.initFlutter(dbDir.path);
-    if (migrationVersion <= 2) {
-      await Hive.deleteBoxFromDisk('settingHistoryCache');
-      await AppState.prefs.setInt('migration', 3);
+    if (AppState.prefs.containsKey('isFirstBoot') && !(AppState.prefs.getBool('isMigratedToSpark') ?? false)) {
+      await Hive.initFlutter(dbDir.path);
+
+      // delete old tables
+
+      for (final boxToDelete in ['wowallets', 'transactions', 'swaps', 'bolt12Offers']) {
+        await Hive.deleteBoxFromDisk(boxToDelete);
+      }
+
+      registerV2Adapters(force: true);
+      Hive.registerAdapter(AccountV1Adapter(), override: true);
+      Hive.registerAdapter(WalletV1Adapter(), override: true);
+
+      final oldAccounts = (await Hive.openBox<Account>(
+        'accounts',
+        encryptionCipher: HiveAesCipher(dbPass),
+      )).values.toList();
+      final oldWallets = (await Hive.openBox<Wallet>(
+        'wallets',
+        encryptionCipher: HiveAesCipher(dbPass),
+      )).values.toList();
+
+      await Hive.close();
+      await Hive.deleteBoxFromDisk('accounts');
+      await Hive.deleteBoxFromDisk('wallets');
+      registerV2Adapters(force: true);
+
+      await (await Hive.openBox<Account>(
+        'accounts',
+        encryptionCipher: HiveAesCipher(dbPass),
+      )).putAll(Map.fromEntries(oldAccounts.map((e) => MapEntry(e.id, e))));
+      await (await Hive.openBox<Wallet>(
+        'wallets',
+        encryptionCipher: HiveAesCipher(dbPass),
+      )).putAll(Map.fromEntries(oldWallets.map((e) => MapEntry(e.uuid, e))));
+
+      await Hive.close();
+      await AppState.prefs.setBool('isMigratedToSpark', true);
     }
   } catch (e, s) {
     logE(e, stackTrace: s, showToast: true);
@@ -609,4 +643,59 @@ Future<bool?> migrateDB() async {
     return false;
   }
   return true;
+}
+
+class AccountV1Adapter extends TypeAdapter<Account> {
+  @override
+  final typeId = 1;
+
+  @override
+  Account read(BinaryReader reader) {
+    final id = reader.readString();
+    final name = reader.readString();
+    final createdAtUTC = reader.read() as DateTime;
+    final isMainAccount = reader.readBool();
+    final isDisabled = reader.readBool();
+    final isBackedUp = reader.readBool();
+    final isSendAnonymously = reader.readBool();
+    final isSendNotification = reader.readBool();
+    final sortOrder = reader.readInt();
+    final chatKeyPair = reader.read() as KeyPair?;
+    final nsec = reader.read() as String?;
+    return Account(
+      id: id,
+      name: name,
+      createdAtUTC: createdAtUTC,
+      isMainAccount: isMainAccount,
+      isDisabled: isDisabled,
+      isBackedUp: isBackedUp,
+      isSendAnonymously: isSendAnonymously,
+      sortOrder: sortOrder,
+      chatKeyPair: chatKeyPair,
+      nsec: nsec,
+    );
+  }
+
+  @override
+  void write(BinaryWriter writer, Account obj) {}
+}
+
+class WalletV1Adapter extends TypeAdapter<Wallet> {
+  @override
+  final typeId = 2;
+
+  @override
+  Wallet read(BinaryReader reader) {
+    final accountId = reader.readString();
+    final xpub = reader.readString();
+    final descriptor = reader.readString();
+    final network = Network.values[reader.readInt()];
+    final type = WalletType.values[reader.readInt()];
+    final balance = reader.readInt();
+    final isCorrupted = reader.readBool();
+    return Wallet(accountId: accountId, xpub: xpub, network: network, type: type, balance: balance);
+  }
+
+  @override
+  void write(BinaryWriter writer, Wallet obj) {}
 }
