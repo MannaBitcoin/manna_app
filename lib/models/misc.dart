@@ -1,4 +1,4 @@
-import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart' show InputType, SendOnchainFeeQuote;
+import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart' show InputType;
 import 'package:manna/models/account.dart';
 import 'package:manna/models/contact.dart';
 import 'package:manna/models/enums.dart';

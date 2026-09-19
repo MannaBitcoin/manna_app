@@ -37,7 +37,6 @@ class _NewReceivedTxBottomSheetState extends State<NewReceivedTxBottomSheet> {
 
   @override
   void initState() {
-    if (txs.isEmpty) AppRouter.pop();
     transactionSubscription = DB.transactionBox.watch().listen((_) => update());
 
     carouselController.addListener(update);

@@ -1,7 +1,7 @@
 name: manna
 description: "A Slick Bitcoin wallet"
 publish_to: 'none'
-version: 1.2.23+51
+version: 1.2.25+55
 
 environment:
   sdk: ">=3.12.0"
@@ -77,8 +77,8 @@ dependencies:
   http: ^1.6.0
   cryptography_plus: ^3.0.0
   device_info_plus: ^13.1.0
-  nfc_manager: ^4.2.1
-  nfc_manager_ndef: ^1.1.0
+#  nfc_manager: ^4.2.1
+#  nfc_manager_ndef: ^1.1.0
   app_settings: ^7.0.0
   wakelock_plus: ^1.6.1
   flutter_image_compress: ^2.4.0

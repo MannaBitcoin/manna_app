@@ -369,12 +369,12 @@ class DbService {
             await w.spark?.registerWebhook(
               request: RegisterWebhookRequest(
                 url: webHookUrl,
-                secret: 'MAYAINEVERSUCEEDMAYEVERYONEBEHAPPY',
+                secret: 'MANNATEAMISDOPEE',
                 eventTypes: [
-                  // WebhookEventType.staticDepositFinished(),
-                  // WebhookEventType.coopExitFinished(),
+                  const WebhookEventType.staticDepositFinished(),
+                  const WebhookEventType.coopExitFinished(),
                   const WebhookEventType.lightningReceiveFinished(),
-                  // WebhookEventType.lightningSendFinished(),
+                  const WebhookEventType.lightningSendFinished(),
                 ],
               ),
             );

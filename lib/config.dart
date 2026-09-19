@@ -19,7 +19,6 @@ class Config {
   static late final String breezApiKey;
 
   static late final ApiConfig apiConfig;
-  static late final Duration liquidSyncInterval;
   static late final bool isRegtestOn;
 
   static late final bool isBolt12SendEnabled;
@@ -68,7 +67,6 @@ class Config {
         serverApiVersion: env.serverApiVersionTestnet ?? '',
       ),
     );
-    liquidSyncInterval = Duration(minutes: env.liquidSyncIntervalMinutes);
 
     final regtest = apiConfig.regtest;
     isRegtestOn =

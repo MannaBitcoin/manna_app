@@ -440,8 +440,9 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                         TextButton(onPressed: () => AppRouter.pop(false), child: const Text('Cancel')),
                         TextButton(
                           onPressed: () async {
-                            await WalletService.deleteAccount(widget.accountId);
-                            AppRouter.pop(true);
+                            if (await WalletService.deleteAccount(widget.accountId)) {
+                              AppRouter.pop(true);
+                            }
                           },
                           child: const Text('Delete'),
                         ),

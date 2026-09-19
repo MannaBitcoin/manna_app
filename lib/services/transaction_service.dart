@@ -428,7 +428,7 @@ class TransactionService {
             final primaryAddressData = await processInputType(
               field0.paymentMethods.first,
               amountSats: field0.amountSat?.i,
-              comment: field0.label ?? field0.message,
+              comment: field0.message ?? field0.label,
             );
             if (field0.paymentMethods.length > 1) {
               fallback = await processInputType(field0.paymentMethods[1]);
@@ -445,7 +445,9 @@ class TransactionService {
       }
     } on AddressParsingException catch (e) {
       ToastService.show(e.message);
-    } catch (_) {}
+    } catch (_) {
+      rethrow;
+    }
 
     return AddressData(addressType: AddressType.unknown, data: null, address: rawAddress);
   }

@@ -1,6 +1,7 @@
 import 'dart:async';
 
-import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart' show GetSparkStatusRequest, getSparkStatus, ServiceStatus;
+import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart'
+    show GetSparkStatusRequest, getSparkStatus, ServiceStatus;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';

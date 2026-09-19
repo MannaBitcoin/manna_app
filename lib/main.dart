@@ -27,7 +27,6 @@ import 'package:manna/services/db_service.dart';
 import 'package:manna/services/deep_link_service.dart';
 import 'package:manna/services/deposit_claim_service.dart';
 import 'package:manna/services/jwt_service.dart';
-import 'package:manna/services/nfc_service.dart';
 import 'package:manna/services/notification_service.dart';
 import 'package:manna/services/wallet_service.dart';
 import 'package:manna/theme.dart';
@@ -130,7 +129,7 @@ class MannaAppState extends State<MannaApp> with WidgetsBindingObserver {
     await NotificationService.initialize();
     await NotificationService.storeInitialNotification();
     await DeepLinkService.storeInitialData();
-    NfcService.storeInitialNFCAppOpen();
+    // NfcService.storeInitialNFCAppOpen();
 
     await AppState.prefs.setInt('backgroundDateTime', DateTime.now().millisecondsSinceEpoch);
     connectivitySub = Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> result) {
@@ -167,7 +166,7 @@ class MannaAppState extends State<MannaApp> with WidgetsBindingObserver {
 
           await NotificationService.storeInitialNotification();
           await DeepLinkService.storeInitialData();
-          NfcService.storeInitialNFCAppOpen();
+          // NfcService.storeInitialNFCAppOpen();
 
           // First launch or no background recorded: do nothing special
           if (backgroundTs == null) {

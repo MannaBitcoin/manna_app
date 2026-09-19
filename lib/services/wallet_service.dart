@@ -33,6 +33,7 @@ import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart'
         SdkEvent_UnilateralExitStateChanged,
         Network;
 import 'package:breez_sdk_spark_flutter/src/rust/sdk_context.dart' show newSharedSdkContext, SdkContext;
+import 'package:flutter/foundation.dart';
 import 'package:manna/config.dart';
 import 'package:manna/globals.dart';
 import 'package:manna/models/account.dart';
@@ -66,8 +67,6 @@ class WalletService {
   // xpub : (spark wallet, event listener)
   static final Map<String, (BreezSdk, StreamSubscription)> sparkNodes = {};
 
-  static Timer? _syncTimer;
-
   static Future<bool> initAllWallets() async {
     final activeWalletsIds = DB.activeAccounts.map((e) => e.id).nonNulls.toSet();
     final activeWalletsXpub = DB.allWallets
@@ -86,7 +85,6 @@ class WalletService {
     }
 
     disposeNonActiveWallets();
-    startPeriodicSync();
     return activeWalletsXpub.every((xpub) => sparkNodes.containsKey(xpub));
   }
 
@@ -204,20 +202,32 @@ class WalletService {
         } else {
           GlobalListener.update(stream: .account);
         }
-        logD('SdkEvent_PaymentSucceeded ${payment.id}');
+        if (kDebugMode) {
+          print('SdkEvent_PaymentSucceeded ${payment.id}');
+        }
       case SdkEvent_PaymentPending(:final payment):
-        logD('SdkEvent_PaymentPending ${payment.id}');
+        if (kDebugMode) {
+          print('SdkEvent_PaymentPending ${payment.id}');
+        }
       case SdkEvent_PaymentFailed(:final payment):
         GlobalListener.update(stream: .account);
-        logD('SdkEvent_PaymentFailed ${payment.id}');
+        if (kDebugMode) {
+          print('SdkEvent_PaymentFailed ${payment.id}');
+        }
       case SdkEvent_ClaimedDeposits(:final claimedDeposits):
-        logD('SdkEvent_ClaimedDeposits ${claimedDeposits.map((e) => e.txid)}');
+        if (kDebugMode) {
+          print('SdkEvent_ClaimedDeposits ${claimedDeposits.map((e) => e.txid)}');
+        }
         unawaited(DepositClaimService.onClaimedDeposits(walletId: walletId, deposits: claimedDeposits));
       case SdkEvent_NewDeposits(:final newDeposits):
-        logD('SdkEvent_NewDeposits ${newDeposits.map((e) => e.txid)}');
+        if (kDebugMode) {
+          print('SdkEvent_NewDeposits ${newDeposits.map((e) => e.txid)}');
+        }
         unawaited(DepositClaimService.onNewDeposits(walletId: walletId, deposits: newDeposits));
       case SdkEvent_UnclaimedDeposits(:final unclaimedDeposits):
-        logD('SdkEvent_UnclaimedDeposits ${unclaimedDeposits.map((e) => e.txid)}');
+        if (kDebugMode) {
+          print('SdkEvent_UnclaimedDeposits ${unclaimedDeposits.map((e) => e.txid)}');
+        }
         unawaited(DepositClaimService.onUnclaimedDeposits(walletId: walletId, deposits: unclaimedDeposits));
       case SdkEvent_AutoOptimization(:final optimizationEvent):
         switch (optimizationEvent) {
@@ -228,11 +238,17 @@ class WalletService {
           case AutoOptimizationEvent_Failed():
           case AutoOptimizationEvent_Skipped():
         }
-        logD('SdkEvent_AutoOptimization $optimizationEvent');
+        if (kDebugMode) {
+          print('SdkEvent_AutoOptimization $optimizationEvent');
+        }
       case SdkEvent_LightningAddressChanged(:final lightningAddress):
-        logD('SdkEvent_LightningAddressChanged ${lightningAddress?.lightningAddress}');
+        if (kDebugMode) {
+          print('SdkEvent_LightningAddressChanged ${lightningAddress?.lightningAddress}');
+        }
       case SdkEvent_UnilateralExitStateChanged():
-        logD('SdkEvent_UnilateralExitStateChanged');
+        if (kDebugMode) {
+          print('SdkEvent_UnilateralExitStateChanged');
+        }
     }
   }
 
@@ -272,9 +288,8 @@ class WalletService {
             }
           }
         }
-
-        await Future.wait(saveFutures);
       }
+      await Future.wait(saveFutures);
     } catch (e, s) {
       logE(e, stackTrace: s);
     }
@@ -338,29 +353,6 @@ class WalletService {
 
   static Future<void> syncAllWallets() => Future.wait(sparkNodes.keys.map((xpub) => sync(xpub: xpub)));
 
-  // TransactionIdWithWallet string: counter
-  static Map<String, int> syncCount = {};
-  static void startPeriodicSync() {
-    syncAllWallets().then((_) {
-      stopPeriodicSync();
-      _syncTimer = Timer.periodic(Config.liquidSyncInterval, (timer) {
-        final activeXpubs = DB.activeAccounts.map((e) => e.currentWallet.xpub).toSet();
-        Future.wait(
-          sparkNodes.keys.map((xpub) async {
-            if (activeXpubs.contains(xpub)) {
-              await sync(xpub: xpub);
-            }
-          }),
-        );
-      });
-    });
-  }
-
-  static void stopPeriodicSync() {
-    _syncTimer?.cancel();
-    _syncTimer = null;
-  }
-
   // delete the actual files storing lwk data
   static Future<void> deleteWalletCache({required Wallet wallet}) async {
     final subPath = path.join('spark', wallet.accountId, wallet.network.name);
@@ -408,11 +400,13 @@ class WalletService {
       for (final w in wallets) {
         final appSetId = await getDeviceId();
         try {
-          await DbService.useSupabase(
-            (supabase) async =>
-                await supabase.from('devices').delete().eq('wallet_uuid', w.uuid).eq('device_id', appSetId),
-            network: w.network,
-          );
+          if (w.network.to == Network.regtest ? Config.isRegtestOn : true) {
+            await DbService.useSupabase(
+              (supabase) async =>
+                  await supabase.from('devices').delete().eq('wallet_uuid', w.uuid).eq('device_id', appSetId),
+              network: w.network,
+            );
+          }
         } catch (_) {}
 
         for (final t in DB.allTransactions.values.where((t) => t.walletId == w.uuid).toList()) {
@@ -536,7 +530,6 @@ class WalletService {
       try {
         if (await DbService.upsertWallets({walletMain: {}, ?walletRegtest: {}})) {
           if (await initSpark(xpub: wallet.xpub, waitForSync: true)) {
-            startPeriodicSync();
             selectAccount(account.id);
             GlobalListener.update(stream: .account);
             unawaited(DbService.syncEverything());
@@ -668,7 +661,6 @@ class WalletService {
 
           DB.loadAllData();
           if (await initSpark(xpub: wallet.xpub, waitForSync: true)) {
-            startPeriodicSync();
             selectAccount(account.id);
             GlobalListener.update(stream: .account);
 

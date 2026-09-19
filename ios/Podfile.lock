@@ -1,4 +1,6 @@
 PODS:
+  - breez_sdk_spark_flutter (0.25.0):
+    - Flutter
   - Flutter (1.0.0)
   - flutter_inappwebview_ios (0.0.1):
     - Flutter
@@ -10,6 +12,7 @@ PODS:
   - OrderedSet (6.0.3)
 
 DEPENDENCIES:
+  - breez_sdk_spark_flutter (from `.symlinks/plugins/breez_sdk_spark_flutter/ios`)
   - Flutter (from `Flutter`)
   - flutter_inappwebview_ios (from `.symlinks/plugins/flutter_inappwebview_ios/ios`)
 
@@ -18,16 +21,19 @@ SPEC REPOS:
     - OrderedSet
 
 EXTERNAL SOURCES:
+  breez_sdk_spark_flutter:
+    :path: ".symlinks/plugins/breez_sdk_spark_flutter/ios"
   Flutter:
     :path: Flutter
   flutter_inappwebview_ios:
     :path: ".symlinks/plugins/flutter_inappwebview_ios/ios"
 
 SPEC CHECKSUMS:
+  breez_sdk_spark_flutter: 33d9b642241ad965e1016e0df4e0e9f5da680406
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   flutter_inappwebview_ios: b89ba3482b96fb25e00c967aae065701b66e9b99
   OrderedSet: e539b66b644ff081c73a262d24ad552a69be3a94
 
-PODFILE CHECKSUM: f2095d9946016fd9e5adc1075579dbb37c2bbacc
+PODFILE CHECKSUM: 546905b42b12033c68f53fb8e898c145d3fa069c
 
 COCOAPODS: 1.16.2

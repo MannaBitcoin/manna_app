@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:branta/branta.dart' hide Platform;
 import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart' show OnchainConfirmationSpeed;
@@ -20,7 +19,6 @@ import 'package:manna/services/clipboard_service.dart';
 import 'package:manna/services/db.dart';
 import 'package:manna/services/db_service.dart';
 import 'package:manna/services/log_service.dart';
-import 'package:manna/services/nfc_service.dart';
 import 'package:manna/services/nostr_service.dart';
 import 'package:manna/services/transaction_service.dart';
 import 'package:manna/theme.dart';
@@ -35,7 +33,6 @@ import 'package:manna/widgets/bottom%20sheets/confirm_payment_bottom_sheet.dart'
 import 'package:manna/widgets/bottom%20sheets/transaction_categories_bottom_sheet.dart';
 import 'package:manna/widgets/fees_tile.dart';
 import 'package:manna_core/manna_core.dart';
-import 'package:nfc_manager/nfc_manager.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'package:http/http.dart' as http;
 
@@ -86,7 +83,7 @@ class _SendScreenState extends State<SendScreen> {
 
   BrantaData? brantaData;
   String? bolt12Issuer;
-  NfcAvailability? nfcStatus;
+  // NfcAvailability? nfcStatus;
 
   final activeWalletIds = DB.activeAccounts.map((acc) => acc.currentWallet).nonNulls.map((e) => e.uuid).toSet();
 
@@ -94,12 +91,13 @@ class _SendScreenState extends State<SendScreen> {
   void initState() {
     lifecycleListener = AppLifecycleListener(
       onResume: () async {
-        nfcStatus = await NfcService.getNFCState();
+        // nfcStatus = await NfcService.getNFCState();
         update();
         await getClipboardData();
       },
     );
-    NfcService.start().then((value) => NfcService.getNFCState().then((value) => update(() => nfcStatus = value)));
+    // TODO
+    // NfcService.start().then((value) => NfcService.getNFCState().then((value) => update(() => nfcStatus = value)));
 
     if (widget.address != null) {
       processAddress(widget.address!, defaultAmount: widget.amount);
@@ -111,7 +109,7 @@ class _SendScreenState extends State<SendScreen> {
 
   @override
   void dispose() {
-    NfcService.stop();
+    // NfcService.stop();
     lifecycleListener?.dispose();
     addressController.dispose();
     satAmountController.dispose();
@@ -163,16 +161,16 @@ class _SendScreenState extends State<SendScreen> {
         title: const Text('Send'),
         actions: [
           IconButton(onPressed: () => AppRouter.push(const ContactScreen()), icon: const Icon(Icons.contacts_outlined)),
-          if (Platform.isAndroid && nfcStatus != NfcAvailability.unsupported)
-            IconButton(
-              onPressed: () async {
-                await NfcService.start(force: true);
-                nfcStatus = await NfcService.getNFCState();
-                ToastService.show('NFC ready');
-                update();
-              },
-              icon: Icon(Icons.nfc, color: nfcStatus == NfcAvailability.enabled ? AppColors.primaryColor : null),
-            ),
+          // if (Platform.isAndroid && nfcStatus != NfcAvailability.unsupported)
+          //   IconButton(
+          //     onPressed: () async {
+          //       await NfcService.start(force: true);
+          //       nfcStatus = await NfcService.getNFCState();
+          //       ToastService.show('NFC ready');
+          //       update();
+          //     },
+          //     icon: Icon(Icons.nfc, color: nfcStatus == NfcAvailability.enabled ? AppColors.primaryColor : null),
+          //   ),
         ],
         actionsPadding: const EdgeInsets.symmetric(horizontal: 12),
       ),
@@ -844,10 +842,10 @@ class _SendScreenState extends State<SendScreen> {
                 originalAmount = amount = addressData.amount;
                 satAmountController.text = amount.toStringAsFixed(0);
                 fiatAmountController.text = amount.satsToFiat().toStringAsFixed(2);
-                commentController.text = addressData.comment?.trim() ?? '';
                 lockAmount = addressData.lockAmount;
-                lockComment = lockAmount && commentController.text.trim().isNotEmpty;
               }
+              commentController.text = addressData.comment?.trim() ?? '';
+              lockComment = lockAmount && commentController.text.trim().isNotEmpty;
 
               if (addressData.addressType == AddressType.lnurl) {
                 if (addressData.address.isMannaUserName && (addressData.address.getUserName?.isNotEmpty ?? false)) {
